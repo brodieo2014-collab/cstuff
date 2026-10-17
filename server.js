@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { server as wisp } from '@mercuryworkshop/wisp-js/server';
-import { uvPath } from '@titaniumnetwork-dev/ultraviolet';
+import { scramjetPath } from '@mercuryworkshop/scramjet/path';
 import { baremuxPath } from '@mercuryworkshop/bare-mux/node';
 import { epoxyPath } from '@mercuryworkshop/epoxy-transport';
 
@@ -22,7 +22,7 @@ app.get('/healthz', (_req, res) => res.type('text').send('ok'));
 
 const staticOpts = { maxAge: '1h' };
 app.use(express.static(path.join(__dirname, 'public'), staticOpts));
-app.use('/uv/', express.static(uvPath, staticOpts));
+app.use('/scram/', express.static(scramjetPath, staticOpts));
 app.use('/baremux/', express.static(baremuxPath, staticOpts));
 app.use('/epoxy/', express.static(epoxyPath, staticOpts));
 

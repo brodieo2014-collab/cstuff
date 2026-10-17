@@ -1,6 +1,6 @@
 # cstuff
 
-A black-themed site with a working web proxy (Ultraviolet + Epoxy/Wisp), a games page, a live chat and a credits page. The site opens on the proxy. Falling leaves run on every page.
+A black-themed site with a working web proxy (Scramjet + Epoxy/Wisp), a games page, a live chat and a credits page. The site opens on the proxy. Falling leaves run on every page.
 
 ## Run locally
 
