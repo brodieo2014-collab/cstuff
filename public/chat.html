@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>cstuff — chat</title>
+<meta name="description" content="cstuff: a fast web proxy, free browser games and a live chat.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%82%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/style.css">
+
+</head>
+<body>
+<canvas id="leaves"></canvas>
+<header class="nav">
+  <a class="brand" href="/"><span>c<span class="dot">stuff</span></span></a>
+  <a class="link" href="/">Proxy</a>
+  <a class="link" href="/games.html">Games</a>
+  <a class="link active" href="/chat.html">Chat</a>
+  <a class="link" href="/credits.html">Credits</a>
+</header>
+<main>
+  <h1>Chat</h1>
+  <p class="lead">A live public room. Be kind, keep it clean, don't share personal info.</p>
+  <div class="card join" id="join">
+    <h2>Pick a name</h2>
+    <form id="join-form"><input id="name" type="text" maxlength="20" placeholder="Your name" autocomplete="off"><button class="primary" type="submit">Join</button></form>
+  </div>
+  <div class="card chat" id="chat" hidden>
+    <div class="top"><span id="me"></span><span><b id="online">0</b> online</span></div>
+    <div class="msgs" id="msgs"></div>
+    <form id="send"><input id="text" type="text" maxlength="300" placeholder="Say something…" autocomplete="off"><button class="primary" type="submit">Send</button></form>
+  </div>
+</main>
+<script src="/js/leaves.js"></script>
+<script src="/js/chat.js"></script>
+</body>
+</html>

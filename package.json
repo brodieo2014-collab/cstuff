@@ -1,0 +1,21 @@
+{
+  "name": "cstuff",
+  "version": "1.0.0",
+  "description": "cstuff - proxy, games and chat",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@mercuryworkshop/bare-mux": "^2.1.9",
+    "@mercuryworkshop/epoxy-transport": "^2.1.28",
+    "@mercuryworkshop/wisp-js": "^0.5.0",
+    "@titaniumnetwork-dev/ultraviolet": "^3.2.10",
+    "express": "^5.3.0",
+    "ws": "^8.22.0"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

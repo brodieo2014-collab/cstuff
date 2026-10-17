@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>cstuff — proxy</title>
+<meta name="description" content="cstuff: a fast web proxy, free browser games and a live chat.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%82%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/style.css">
+
+</head>
+<body>
+<canvas id="leaves"></canvas>
+<header class="nav">
+  <a class="brand" href="/"><span>c<span class="dot">stuff</span></span></a>
+  <a class="link active" href="/">Proxy</a>
+  <a class="link" href="/games.html">Games</a>
+  <a class="link" href="/chat.html">Chat</a>
+  <a class="link" href="/credits.html">Credits</a>
+</header>
+<main>
+  <section class="hero">
+    <h1>c<span class="accent">stuff</span></h1>
+    <p class="lead" style="margin:0 auto">Browse the web through cstuff. Type a link or search for anything.</p>
+    <form class="searchbar" id="go" autocomplete="off">
+      <input id="q" type="text" placeholder="Search or enter a web address" spellcheck="false" autofocus>
+      <button class="primary" type="submit">Go</button>
+    </form>
+    <p class="status" id="status">Starting up…</p>
+    <div class="tiles">
+      <a class="tile" data-url="https://duckduckgo.com"><span class="ic">🦆</span>DuckDuckGo</a>
+      <a class="tile" data-url="https://en.wikipedia.org"><span class="ic">📚</span>Wikipedia</a>
+      <a class="tile" data-url="https://www.youtube.com"><span class="ic">▶️</span>YouTube</a>
+      <a class="tile" data-url="https://www.reddit.com"><span class="ic">💬</span>Reddit</a>
+      <a class="tile" data-url="https://github.com"><span class="ic">🐙</span>GitHub</a>
+      <a class="tile" data-url="https://news.ycombinator.com"><span class="ic">📰</span>Hacker News</a>
+    </div>
+    <p class="note">Some large sites (logins, video, heavy apps) may not work perfectly through any web proxy. If a page looks broken, try another one.</p>
+  </section>
+</main>
+<div class="browser" id="browser">
+  <div class="toolbar">
+    <button id="b-home" title="Close">✕</button>
+    <button id="b-back" title="Back">←</button>
+    <button id="b-fwd" title="Forward">→</button>
+    <button id="b-reload" title="Reload">⟳</button>
+    <input id="b-url" type="text" spellcheck="false">
+    <button id="b-full" title="Fullscreen">⛶</button>
+  </div>
+  <iframe id="frame" title="cstuff browser" allow="fullscreen; autoplay; clipboard-read; clipboard-write"></iframe>
+</div>
+<script src="/js/leaves.js"></script>
+<script src="/uv/uv.bundle.js"></script>
+<script src="/uvconfig.js"></script>
+<script type="module" src="/js/proxy.js"></script>
+</body>
+</html>
