@@ -1,6 +1,7 @@
 (() => {
   const canvas = document.getElementById('leaves');
   if (!canvas) return;
+  if (window.cstuff && window.cstuff.get().leaves === false) { canvas.remove(); return; }
   const ctx = canvas.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const colors = ['#c2410c', '#ea580c', '#f59e0b', '#b45309', '#9a3412', '#a16207', '#d97706', '#65a30d'];

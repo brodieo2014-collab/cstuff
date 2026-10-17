@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>cstuff — settings</title>
+<meta name="description" content="cstuff: a fast web proxy, free browser games and a live chat.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%82%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/style.css">
+
+</head>
+<body>
+<canvas id="leaves"></canvas>
+<header class="nav">
+  <a class="brand" href="/"><span>c<span class="dot">stuff</span></span></a>
+  <a class="link" href="/">Proxy</a>
+  <a class="link" href="/games.html">Games</a>
+  <a class="link" href="/chat.html">Chat</a>
+  <a class="link" href="/credits.html">Credits</a>
+  <a class="link active" href="/settings.html">Settings</a>
+</header>
+<main>
+  <h1>Settings</h1>
+  <p class="lead">Saved on this device only.</p>
+  <div class="settings">
+    <div class="card">
+      <h2>about:blank</h2>
+      <p class="lead" style="margin-bottom:6px">Opens cstuff inside a blank browser tab, so the address bar shows <code>about:blank</code> instead of the site. Your browser may ask you to allow pop-ups.</p>
+      <div class="btns">
+        <button class="primary" id="blank">Open in about:blank</button>
+        <button id="blank-only">Open, keep this tab</button>
+      </div>
+      <p class="status" id="blank-msg"></p>
+      <div class="row">
+        <div class="lbl"><b>Open in about:blank automatically</b><span>On each visit, show a "click anywhere" prompt that opens the blank tab. Browsers only allow pop-ups after a click.</span></div>
+        <label class="switch"><input type="checkbox" id="t-auto"><span class="sl"></span></label>
+      </div>
+      <div class="row">
+        <div class="lbl"><b>This tab becomes</b><span>After opening the blank tab, this tab goes to this address.</span></div>
+        <input id="redirect" type="text" placeholder="https://www.google.com" spellcheck="false">
+      </div>
+    </div>
+    <div class="card">
+      <h2>General</h2>
+      <div class="row">
+        <div class="lbl"><b>Falling leaves</b><span>Turn the background animation off if your device is slow. Takes effect on the next page load.</span></div>
+        <label class="switch"><input type="checkbox" id="t-leaves"><span class="sl"></span></label>
+      </div>
+      <div class="row">
+        <div class="lbl"><b>Search engine</b><span>Used when you type a search in the proxy instead of a web address.</span></div>
+        <select id="engine"><option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option><option value="bing">Bing</option><option value="brave">Brave Search</option></select>
+      </div>
+      <div class="row">
+        <div class="lbl"><b>Reset everything</b><span>Clears these settings. Game scores are kept.</span></div>
+        <button id="reset">Reset</button>
+      </div>
+    </div>
+  </div>
+</main>
+<div id="saved">Saved</div>
+<script src="/js/core.js"></script>
+<script src="/js/leaves.js"></script>
+<script src="/js/settings.js"></script>
+</body>
+</html>

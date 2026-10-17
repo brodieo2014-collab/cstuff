@@ -75,7 +75,9 @@ function toUrl(input) {
   if (!v) return null;
   if (/^https?:\/\//i.test(v)) return v;
   if (/^[^\s]+\.[a-z]{2,}([/:?#].*)?$/i.test(v) || /^localhost(:\d+)?/i.test(v)) return 'https://' + v;
-  return 'https://duckduckgo.com/?q=' + encodeURIComponent(v);
+  const engines = (window.cstuff && window.cstuff.ENGINES) || {};
+  const base = engines[window.cstuff?.get().engine] || 'https://duckduckgo.com/?q=';
+  return base + encodeURIComponent(v);
 }
 
 async function open(input) {
