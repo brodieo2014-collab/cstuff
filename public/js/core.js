@@ -9,6 +9,9 @@
     theme: 'black',
     gamesMode: 'default',
     fitGames: true,
+    proxyGames: false,
+    cloak: 'none',
+    panicKey: '`',
   };
   const AUTUMN = ['#c2410c', '#ea580c', '#f59e0b', '#b45309', '#9a3412', '#a16207', '#d97706', '#65a30d'];
   const THEMES = {
@@ -83,7 +86,37 @@
     return true;
   }
 
-  window.cstuff = { get, set, ENGINES, THEMES, applyTheme, openBlank, launch, DEFAULTS };
+  // Tab cloak: changes the tab title and icon. Panic key: jumps to the redirect address.
+  const ico = (bg, t) => 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='" + bg + "'/><text x='50' y='72' font-size='62' font-family='Arial' font-weight='bold' text-anchor='middle' fill='#fff'>" + t + '</text></svg>');
+  const CLOAKS = {
+    none: { name: 'None' },
+    classroom: { name: 'Google Classroom', title: 'Classroom', icon: ico('#0f9d58', 'C') },
+    docs: { name: 'Google Docs', title: 'Untitled document - Google Docs', icon: ico('#4285f4', 'D') },
+    drive: { name: 'Google Drive', title: 'My Drive - Google Drive', icon: ico('#fbbc04', 'D') },
+    canvas: { name: 'Canvas', title: 'Dashboard', icon: ico('#e72429', 'C') },
+  };
+  function applyCloak() {
+    const c = CLOAKS[get().cloak];
+    if (!c || !c.title) return;
+    document.title = c.title;
+    let l = document.querySelector('link[rel~=icon]');
+    if (!l) { l = document.createElement('link'); l.rel = 'icon'; document.head.appendChild(l); }
+    l.href = c.icon;
+    new MutationObserver(() => { if (document.title !== c.title) document.title = c.title; })
+      .observe(document.querySelector('title'), { childList: true });
+  }
+  applyCloak();
+  addEventListener('keydown', (e) => {
+    const k = get().panicKey;
+    if (!k || e.key !== k || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target, typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    if (typing) return;
+    e.preventDefault();
+    const to = get().redirect || 'https://classroom.google.com';
+    try { window.top.location.replace(to); } catch { location.replace(to); }
+  }, true);
+
+  window.cstuff = { CLOAKS, get, set, ENGINES, THEMES, applyTheme, openBlank, launch, DEFAULTS };
 
   // Auto-open: browsers only allow pop-ups after a click, so show a one-click prompt.
   const onSettings = location.pathname === '/settings.html';

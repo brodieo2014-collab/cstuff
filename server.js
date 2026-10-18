@@ -1,4 +1,5 @@
 import http from 'node:http';
+import dns from 'node:dns';
 import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,11 +14,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8080;
 
 wisp.options.allow_udp_streams = false;
-wisp.options.dns_method = 'resolve';
-if (process.env.ALLOW_LOOPBACK === '1') wisp.options.allow_loopback_ips = true; // local testing only
+// "Play through the proxy" for games: the proxy reaches this same server under a made-up host name, because
+// Scramjet refuses to proxy the site it is running on. Only that name may resolve to this machine.
+const GAME_HOST = 'cstuff-games.test';
+const TEST_LOOPBACK = process.env.ALLOW_LOOPBACK === '1'; // local testing only
+const resolver = new dns.Resolver();
+if (Array.isArray(wisp.options.dns_servers) && wisp.options.dns_servers.length) { try { resolver.setServers(wisp.options.dns_servers); } catch {} }
+const isLoopback = (a) => /^(127\.|0\.0\.0\.0$|::1$|::$)/.test(a);
+wisp.options.dns_method = async (host) => {
+  if (host === GAME_HOST) return '127.0.0.1';
+  let addr;
+  try { addr = (await resolver.resolve4(host))[0]; } catch { addr = (await resolver.resolve6(host))[0]; }
+  if (isLoopback(addr) && !TEST_LOOPBACK) throw new Error('blocked');
+  return addr;
+};
+wisp.options.allow_loopback_ips = true; // safe: the resolver above only ever returns loopback for GAME_HOST
 
 const app = express();
 app.disable('x-powered-by');
+
+// Requests that arrive under the game host name (from the proxy) may only use the game relay.
+app.use((req, res, next) => {
+  if (req.hostname === GAME_HOST && !req.path.startsWith('/gm/')) return res.status(404).type('text').send('Not found');
+  next();
+});
+app.get('/gm/_info', (_req, res) => res.json({ host: GAME_HOST, port: Number(PORT) }));
 
 app.get('/healthz', (_req, res) => res.type('text').send('ok'));
 
@@ -32,6 +53,7 @@ app.use('/epoxy/', express.static(epoxyPath, staticOpts));
 // Fetches gn-math's game files from GitHub and serves them with proper file types. GitHub's raw host labels
 // everything text/plain (browsers then refuse to run scripts), and CDNs like jsDelivr are blocked on some networks.
 const GM_UPSTREAM = process.env.GM_UPSTREAM || 'https://raw.githubusercontent.com/gn-math';
+const GM_SITE = (process.env.GM_SITE || 'https://gn-math.dev').replace(/\/$/, '');
 const GM_REPOS = new Set(['html', 'assets', 'covers']);
 const GM_PATH = /^[\w .@()+,\-]+(?:\/[\w .@()+,\-]+)*$/;
 
@@ -42,25 +64,37 @@ app.get('/gm/:repo/*path', async (req, res) => {
     return res.status(404).type('text').send('Not found');
   }
   const url = `${GM_UPSTREAM}/${repo}/main/${rel.split('/').map(encodeURIComponent).join('/')}`;
-  let up;
-  try {
-    up = await fetch(url, { signal: AbortSignal.timeout(30000), headers: { 'accept-encoding': 'identity' } });
-  } catch {
-    return res.status(502).type('text').send('Could not reach the game host');
+  const get = (u) => fetch(u, { signal: AbortSignal.timeout(30000), headers: { 'accept-encoding': 'identity' } }).catch(() => null);
+  let up = await get(url);
+  if (!up) return res.status(502).type('text').send('Could not reach the game host');
+  // Many games refer to files that live on the gn-math site itself rather than in the repo; try there on a 404.
+  if (up.status === 404 && repo === 'html') {
+    const alt = await get(`${GM_SITE}/${rel.split('/').map(encodeURIComponent).join('/')}`);
+    if (alt && alt.ok && alt.body && !/text\/html/i.test(alt.headers.get('content-type') || '')) up = alt;
   }
   if (!up.ok || !up.body) return res.status(up.status === 404 ? 404 : 502).type('text').send('Upstream HTTP ' + up.status);
 
   const ext = path.extname(rel).toLowerCase();
+  const viaProxy = req.hostname === GAME_HOST;
   res.type(ext || 'application/octet-stream');
   if (!res.get('Content-Type')) res.type('application/octet-stream');
   const len = up.headers.get('content-length');
+  if (viaProxy && ext === '.html' && (!len || Number(len) < 8e6)) {
+    // Games point some files at public CDNs; send them to this relay instead, and drop analytics scripts.
+    let html = await up.text();
+    html = html.replace(/https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, '/gm/$1/')
+      .replace(/https?:\/\/raw\.githubusercontent\.com\/gn-math\/(html|assets|covers)\/(?:main|master)\//g, '/gm/$1/')
+      .replace(/<script\b[^>]*src=["'][^"']*(?:googletagmanager|google-analytics|doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>\s*<\/script>/gi, '');
+    res.set({ 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
+    return res.type('text/html; charset=utf-8').send(html);
+  }
   if (len) res.set('Content-Length', len);
   res.set({
     'Access-Control-Allow-Origin': '*',
     'Cross-Origin-Resource-Policy': 'cross-origin',
     'X-Content-Type-Options': 'nosniff',
     // If someone opens a game page straight from this address, it runs in an opaque origin, never as cstuff.
-    'Content-Security-Policy': 'sandbox allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock',
+    ...(viaProxy ? {} : { 'Content-Security-Policy': 'sandbox allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock' }),
     'Cache-Control': 'public, max-age=86400',
   });
   const body = Readable.fromWeb(up.body);

@@ -113,14 +113,16 @@ const REPORTER = '<script>(function(){function s(m){try{parent.postMessage({cstu
   '[1500,4000,9000].forEach(function(d){setTimeout(m,d)});})()<\/script>';
 
 /* ---------- fit the game to the window ---------- */
+let proxMode = false;
+const af = () => (proxMode ? $('a-prox') : $('a-player'));
 let fitOn = true, fitBox = null, lastFit = null;
 function applyFit() {
-  const f = $('a-player'), st = $('a-stage');
+  const f = af(), st = $('a-stage');
   if (!fitBox) { f.removeAttribute('style'); return; }
   const k = Math.min(st.clientWidth / fitBox.w, st.clientHeight / fitBox.h, 4);
   f.style.cssText = 'inset:auto;left:50%;top:50%;width:' + fitBox.w + 'px;height:' + fitBox.h + 'px;transform:translate(-50%,-50%) scale(' + k + ')';
 }
-function resetFit() { fitBox = null; lastFit = null; $('a-player').removeAttribute('style'); }
+function resetFit() { fitBox = null; lastFit = null; af().removeAttribute('style'); }
 function onSize(d) {
   if (!fitOn || !current) return;
   if (![d.w, d.h, d.l, d.t, d.vw, d.vh].every(Number.isFinite) || d.w < 320 || d.h < 200) return;
@@ -142,7 +144,7 @@ let diag = [];
 function showDiag(lines) {
   const box = $('a-diag'); box.textContent = '';
   const t = document.createElement('b'); t.textContent = 'Problems: '; box.appendChild(t);
-  box.appendChild(document.createTextNode(lines.slice(-4).join('  ·  ')));
+  box.appendChild(document.createTextNode(lines.slice(-8).join('  ·  ') + (proxMode ? '' : '   —   Tip: try the Proxy button above.')));
   box.hidden = false;
 }
 addEventListener('message', (e) => {
@@ -152,22 +154,74 @@ addEventListener('message', (e) => {
   if (d.cstuff !== 'err' || typeof d.m !== 'string') return;
   if (diag.length >= 25 || diag.includes(d.m)) return;
   diag.push(d.m); showDiag(diag);
+  // For files served by our own relay, ask it why it failed so the message says more than "failed to load".
+  const mm = /^Failed to load: (\S+\/gm\/[^\s]+)$/.exec(d.m);
+  if (mm && !whyDone.has(mm[1])) {
+    whyDone.add(mm[1]);
+    fetch(mm[1]).then(async (r) => {
+      if (r.ok) { diag.push('(' + mm[1].split('/').pop() + ' loads fine now: HTTP ' + r.status + ', ' + (r.headers.get('content-type') || 'no type') + ')'); }
+      else { const t = (await r.text()).slice(0, 80); diag.push(mm[1].split('/').pop() + ' → HTTP ' + r.status + ' ' + t); }
+      showDiag(diag);
+    }).catch((err) => { diag.push(mm[1].split('/').pop() + ' → ' + err.message); showDiag(diag); });
+  }
 });
+const whyDone = new Set();
 
 let playToken = 0, current = null;
 const SAFE = 'allow-scripts allow-pointer-lock allow-popups allow-forms allow-modals';
 const compatList = () => { try { const a = window.cstuff && window.cstuff.get().compat; return Array.isArray(a) ? a : []; } catch { return []; } };
+const proxList = () => { try { const a = window.cstuff && window.cstuff.get().proxied; return Array.isArray(a) ? a : []; } catch { return []; } };
+const wantsProxy = (z) => { try { return !!window.cstuff.get().proxyGames || proxList().includes(z.path); } catch { return false; } };
+function setProxUi(on) { const b = $('a-px'); b.setAttribute('aria-pressed', String(on)); b.textContent = 'Proxy: ' + (on ? 'on' : 'off'); $('a-compat').hidden = on; }
+let measureTimer = 0;
+async function playProxy(z, token) {
+  const px = $('a-prox');
+  $('a-diag').hidden = true;
+  try {
+    const { getEngine } = await import('/js/engine.js?v=20261018i');
+    const sj = await getEngine();
+    if (token !== playToken) return;
+    if (!px._sj) px._sj = sj.createFrame(px);
+    px.hidden = false;
+    let info; try { info = await (await fetch(RELAY + '/_info')).json(); } catch { throw new Error('Could not reach the cstuff server'); }
+    if (token !== playToken) return;
+    px._sj.go('http://' + info.host + ':' + info.port + RELAY + '/html/' + z.path);
+    $('a-load').textContent = '';
+    clearInterval(measureTimer); let n = 0;
+    measureTimer = setInterval(() => {
+      if (token !== playToken || ++n > 8) return clearInterval(measureTimer);
+      try {
+        const d = px.contentDocument; if (!d) return;
+        let b = null;
+        for (const e of d.querySelectorAll('canvas,embed,object,video')) {
+          const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue;
+          if (!b || r.width * r.height > b.w * b.h) b = { w: r.width, h: r.height, l: r.left, t: r.top };
+        }
+        if (b) onSize({ w: Math.round(b.w), h: Math.round(b.h), l: Math.round(b.l), t: Math.round(b.t), vw: px.clientWidth, vh: px.clientHeight });
+      } catch {}
+    }, 2000);
+  } catch (e) {
+    $('a-load').textContent = 'Could not start the proxy.';
+    showDiag(['Proxy: ' + e.message, 'Turn Proxy off to play it directly.']);
+  }
+}
 function setCompatUi(on) {
   const b = $('a-compat'); b.setAttribute('aria-pressed', String(on)); b.textContent = 'Compatibility: ' + (on ? 'on' : 'off');
 }
 async function play(z) {
+  clearInterval(measureTimer);
+  proxMode = wantsProxy(z);
   current = z; resetFit();
   const token = ++playToken;
+  setProxUi(proxMode);
+  $('a-prox').hidden = true; if (!proxMode) { try { $('a-prox').src = 'about:blank'; } catch {} }
+  $('a-player').hidden = proxMode;
   const compat = compatList().includes(z.path);
   setCompatUi(compat);
   $('a-title').textContent = z.name; $('a-load').textContent = 'Loading…';
   $('a-modal').classList.add('open');
   const f = $('a-player'); f.srcdoc = '';
+  if (proxMode) { $('a-title').textContent = z.name; $('a-load').textContent = 'Starting proxy…'; return playProxy(z, token); }
   f.setAttribute('sandbox', compat ? SAFE + ' allow-same-origin' : SAFE);
   $('a-diag').hidden = true; $('a-diag').textContent = ''; diag = [];
   try {
@@ -204,6 +258,13 @@ async function play(z) {
     }
   }
 }
+$('a-px').onclick = () => {
+  if (!current || !window.cstuff) return;
+  if (window.cstuff.get().proxyGames) { alert('Proxy is on for every game (Settings → Games). Turn that off there to change it per game.'); return; }
+  const list = proxList(), on = list.includes(current.path);
+  window.cstuff.set({ proxied: on ? list.filter((p) => p !== current.path) : [...list, current.path] });
+  play(current);
+};
 $('a-compat').onclick = () => {
   if (!current || !window.cstuff) return;
   const list = compatList(), on = list.includes(current.path);
@@ -211,7 +272,7 @@ $('a-compat').onclick = () => {
   window.cstuff.set({ compat: on ? list.filter((p) => p !== current.path) : [...list, current.path] });
   play(current);
 };
-function closePlayer() { playToken++; $('a-modal').classList.remove('open'); $('a-player').srcdoc = ''; }
+function closePlayer() { playToken++; clearInterval(measureTimer); try { $('a-prox').src = 'about:blank'; } catch {} $('a-prox').hidden = true; $('a-modal').classList.remove('open'); $('a-player').srcdoc = ''; }
 $('a-close').onclick = closePlayer;
 $('a-modal').addEventListener('click', (e) => { if (e.target === $('a-modal')) closePlayer(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('a-modal').classList.contains('open')) closePlayer(); });

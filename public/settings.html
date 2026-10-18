@@ -7,8 +7,8 @@
 <title>cstuff — settings</title>
 <meta name="description" content="cstuff: a fast web proxy, free browser games and a live chat.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%82%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="/css/style.css?v=20261018e">
-<script src="/js/theme.js?v=20261018e"></script>
+<link rel="stylesheet" href="/css/style.css?v=20261018f">
+<script src="/js/theme.js?v=20261018f"></script>
 
 </head>
 <body>
@@ -43,6 +43,24 @@
       </div>
     </div>
     <div class="card">
+      <h2>Stay low-key</h2>
+      <div class="row">
+        <div class="lbl"><b>Tab cloak</b><span>Changes the tab title and icon so it looks like another site.</span></div>
+        <select id="cloak"></select>
+      </div>
+      <div class="row">
+        <div class="lbl"><b>Panic key</b><span>Press it anywhere (not while typing) to jump straight to your "This tab becomes" address. Click the box, then press a key. Backspace turns it off.</span></div>
+        <input id="panic" type="text" readonly style="width:90px;text-align:center" spellcheck="false">
+      </div>
+    </div>
+    <div class="card">
+      <h2>Games</h2>
+      <div class="row">
+        <div class="lbl"><b>Play Advanced games through the proxy</b><span>Runs every Advanced game like a website through the cstuff proxy. Slower, but hides requests the game makes to other sites and fixes games that break otherwise (visual novels, for example).</span></div>
+        <label class="switch"><input type="checkbox" id="t-pg"><span class="sl"></span></label>
+      </div>
+    </div>
+    <div class="card">
       <h2>Theme</h2>
       <div class="themes" id="themes"></div>
     </div>
@@ -64,8 +82,8 @@
   </div>
 </main>
 <div id="saved">Saved</div>
-<script src="/js/core.js?v=20261018e"></script>
-<script src="/js/leaves.js?v=20261018e"></script>
-<script src="/js/settings.js?v=20261018e"></script>
+<script src="/js/core.js?v=20261018f"></script>
+<script src="/js/leaves.js?v=20261018f"></script>
+<script src="/js/settings.js?v=20261018f"></script>
 </body>
 </html>

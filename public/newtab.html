@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>New tab</title>
+<link rel="stylesheet" href="/css/style.css?v=20261018i"><script src="/js/theme.js?v=20261018i"></script></head>
+<body>
+<main><section class="hero">
+<h1>c<span class="accent">stuff</span></h1>
+<form class="searchbar" id="go" autocomplete="off"><input id="q" type="text" placeholder="Search or enter a web address" spellcheck="false" autofocus><button class="primary" type="submit">Go</button></form>
+<div class="tiles" id="t"></div>
+</section></main>
+<script>
+const go=(u)=>parent.postMessage({cstuffGo:u},location.origin);
+document.getElementById('go').addEventListener('submit',e=>{e.preventDefault();const v=q.value.trim();if(v)go(v)});
+const list=[['🦆','DuckDuckGo','https://duckduckgo.com'],['📚','Wikipedia','https://en.wikipedia.org'],['▶️','YouTube','https://www.youtube.com'],['💬','Reddit','https://www.reddit.com'],['🔎','Google','https://www.google.com'],['🎮','Twitch','https://www.twitch.tv'],['🗨️','Discord','https://discord.com/app'],['🐙','GitHub','https://github.com']];
+try{JSON.parse(localStorage.getItem('cstuff:sites')||'[]').forEach(u=>{let h=u;try{h=new URL(u).hostname.replace(/^www\./,'')}catch{}list.push(['⭐',h,u])})}catch{}
+for(const [i,n,u] of list){const a=document.createElement('a');a.className='tile';const s=document.createElement('span');s.className='ic';s.textContent=i;a.append(s,n);a.onclick=()=>go(u);t.appendChild(a)}
+</script></body></html>
