@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -26,6 +27,47 @@ app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => re
 app.use('/scram/', express.static(scramjetPath, staticOpts));
 app.use('/baremux/', express.static(baremuxPath, staticOpts));
 app.use('/epoxy/', express.static(epoxyPath, staticOpts));
+
+// ---------- gn-math relay ----------
+// Fetches gn-math's game files from GitHub and serves them with proper file types. GitHub's raw host labels
+// everything text/plain (browsers then refuse to run scripts), and CDNs like jsDelivr are blocked on some networks.
+const GM_UPSTREAM = process.env.GM_UPSTREAM || 'https://raw.githubusercontent.com/gn-math';
+const GM_REPOS = new Set(['html', 'assets', 'covers']);
+const GM_PATH = /^[\w .@()+,\-]+(?:\/[\w .@()+,\-]+)*$/;
+
+app.get('/gm/:repo/*path', async (req, res) => {
+  const { repo } = req.params;
+  const rel = [].concat(req.params.path || []).join('/');
+  if (!GM_REPOS.has(repo) || rel.length > 400 || !GM_PATH.test(rel) || rel.split('/').some((p) => p === '.' || p === '..')) {
+    return res.status(404).type('text').send('Not found');
+  }
+  const url = `${GM_UPSTREAM}/${repo}/main/${rel.split('/').map(encodeURIComponent).join('/')}`;
+  let up;
+  try {
+    up = await fetch(url, { signal: AbortSignal.timeout(30000), headers: { 'accept-encoding': 'identity' } });
+  } catch {
+    return res.status(502).type('text').send('Could not reach the game host');
+  }
+  if (!up.ok || !up.body) return res.status(up.status === 404 ? 404 : 502).type('text').send('Upstream HTTP ' + up.status);
+
+  const ext = path.extname(rel).toLowerCase();
+  res.type(ext || 'application/octet-stream');
+  if (!res.get('Content-Type')) res.type('application/octet-stream');
+  const len = up.headers.get('content-length');
+  if (len) res.set('Content-Length', len);
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+    'X-Content-Type-Options': 'nosniff',
+    // If someone opens a game page straight from this address, it runs in an opaque origin, never as cstuff.
+    'Content-Security-Policy': 'sandbox allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock',
+    'Cache-Control': 'public, max-age=86400',
+  });
+  const body = Readable.fromWeb(up.body);
+  body.on('error', () => res.destroy());
+  res.on('close', () => body.destroy());
+  body.pipe(res);
+});
 
 app.get('/proxy', (_req, res) => res.redirect('/'));
 app.use((_req, res) => res.status(404).sendFile(path.join(__dirname, 'public', '404.html')));

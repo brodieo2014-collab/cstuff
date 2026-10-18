@@ -5,10 +5,11 @@ const $ = (id) => document.getElementById(id);
 // jsDelivr refuses the oversized assets repo (HTTP 403), so the list is also tried straight from GitHub.
 const GH = 'https://raw.githubusercontent.com/gn-math';
 const JSD = 'https://cdn.jsdelivr.net/gh/gn-math';
+const RELAY = '/gm'; // cstuff's own server fetches the files and serves them with the right file types
 const SOURCE = {
-  list: [GH + '/assets/main/zones.json', JSD + '/assets@main/zones.json', 'https://fastly.jsdelivr.net/gh/gn-math/assets@main/zones.json'],
-  covers: [JSD + '/covers@main', GH + '/covers/main'],
-  html: [JSD + '/html@main', GH + '/html/main'],
+  list: [RELAY + '/assets/zones.json'],
+  covers: [RELAY + '/covers'],
+  html: [RELAY + '/html'],
   site: 'https://gn-math.dev/',
 };
 const SKIP_SPECIAL = new Set(['flash', 'tools']); // Flash games need a plugin; tools aren't games.
@@ -106,7 +107,36 @@ async function download(url, onProgress) {
 // Runs inside every game: reports script errors and files that fail to load back to the page.
 const REPORTER = '<script>(function(){function s(m){try{parent.postMessage({cstuff:"err",m:String(m).slice(0,240)},"*")}catch(e){}}' +
   'addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&(t.src||t.href)){s("Failed to load: "+(t.src||t.href))}else{s(e.message||e.error)}},true);' +
-  'addEventListener("unhandledrejection",function(e){var r=e.reason;s("Promise: "+(r&&r.message||r))});})()<\/script>';
+  'addEventListener("unhandledrejection",function(e){var r=e.reason;s("Promise: "+(r&&r.message||r))});' +
+  'function m(){var b=null,q=document.querySelectorAll("canvas,embed,object,iframe,video");for(var i=0;i<q.length;i++){var r=q[i].getBoundingClientRect();if(r.width<2||r.height<2)continue;var c=getComputedStyle(q[i]);if(c.visibility==="hidden"||c.display==="none")continue;var a=r.width*r.height;if(!b||a>b.a)b={a:a,w:r.width,h:r.height,l:r.left,t:r.top}}' +
+  'if(b)try{parent.postMessage({cstuff:"size",w:Math.round(b.w),h:Math.round(b.h),l:Math.round(b.l),t:Math.round(b.t),vw:innerWidth,vh:innerHeight},"*")}catch(e){}}' +
+  '[1500,4000,9000].forEach(function(d){setTimeout(m,d)});})()<\/script>';
+
+/* ---------- fit the game to the window ---------- */
+let fitOn = true, fitBox = null, lastFit = null;
+function applyFit() {
+  const f = $('a-player'), st = $('a-stage');
+  if (!fitBox) { f.removeAttribute('style'); return; }
+  const k = Math.min(st.clientWidth / fitBox.w, st.clientHeight / fitBox.h, 4);
+  f.style.cssText = 'inset:auto;left:50%;top:50%;width:' + fitBox.w + 'px;height:' + fitBox.h + 'px;transform:translate(-50%,-50%) scale(' + k + ')';
+}
+function resetFit() { fitBox = null; lastFit = null; $('a-player').removeAttribute('style'); }
+function onSize(d) {
+  if (!fitOn || !current) return;
+  if (![d.w, d.h, d.l, d.t, d.vw, d.vh].every(Number.isFinite) || d.w < 320 || d.h < 200) return;
+  if (lastFit && Math.abs(d.w - lastFit.w) < 8 && Math.abs(d.h - lastFit.h) < 8) return;
+  if (d.w >= 0.92 * d.vw && d.h >= 0.92 * d.vh) { resetFit(); return; } // already spans the window
+  const cx = Math.abs(2 * d.l + d.w - d.vw) < 24, cy = Math.abs(2 * d.t + d.h - d.vh) < 24;
+  fitBox = { w: cx ? d.w : d.l + d.w, h: cy ? d.h : d.t + d.h };
+  lastFit = { w: d.w, h: d.h };
+  applyFit();
+}
+function setFitUi() { const b = $('a-fit'); b.setAttribute('aria-pressed', String(fitOn)); b.textContent = 'Fit: ' + (fitOn ? 'on' : 'off'); }
+$('a-fit').onclick = () => {
+  fitOn = !fitOn; setFitUi(); if (window.cstuff) window.cstuff.set({ fitGames: fitOn });
+  if (!fitOn) resetFit(); else if (current) play(current);
+};
+new ResizeObserver(() => { if (fitBox) applyFit(); }).observe($('a-stage'));
 
 let diag = [];
 function showDiag(lines) {
@@ -117,7 +147,9 @@ function showDiag(lines) {
 }
 addEventListener('message', (e) => {
   const d = e.data;
-  if (e.source !== $('a-player').contentWindow || !d || d.cstuff !== 'err' || typeof d.m !== 'string') return;
+  if (e.source !== $('a-player').contentWindow || !d) return;
+  if (d.cstuff === 'size') return onSize(d);
+  if (d.cstuff !== 'err' || typeof d.m !== 'string') return;
   if (diag.length >= 25 || diag.includes(d.m)) return;
   diag.push(d.m); showDiag(diag);
 });
@@ -129,7 +161,7 @@ function setCompatUi(on) {
   const b = $('a-compat'); b.setAttribute('aria-pressed', String(on)); b.textContent = 'Compatibility: ' + (on ? 'on' : 'off');
 }
 async function play(z) {
-  current = z;
+  current = z; resetFit();
   const token = ++playToken;
   const compat = compatList().includes(z.path);
   setCompatUi(compat);
@@ -148,11 +180,19 @@ async function play(z) {
           if (token === playToken) $('a-load').textContent = 'Downloading ' + mb(got) + (total ? ' of ' + mb(total) : '') + '…';
         });
         from = url; break;
-      } catch (e) { problems.push(new URL(url).hostname + ': ' + e.message); if (token !== playToken) return; }
+      } catch (e) { problems.push(new URL(url, location.href).hostname + ': ' + e.message); if (token !== playToken) return; }
     }
     if (token !== playToken) return;
     if (html == null) throw new Error(problems.join(' | '));
-    const base = '<base href="' + from.slice(0, from.lastIndexOf('/') + 1).replace(/"/g, '%22') + '">';
+    if (from.startsWith(RELAY + '/')) {
+      // Point files that games reference on public CDNs at the relay too, so they get the right file types.
+      html = html.replace(/https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, location.origin + RELAY + '/$1/')
+                 .replace(/https?:\/\/raw\.githubusercontent\.com\/gn-math\/(html|assets|covers)\/(?:main|master)\//g, location.origin + RELAY + '/$1/');
+    }
+    // Drop analytics/ad scripts: they only add requests the school may block.
+    html = html.replace(/<script\b[^>]*src=["'][^"']*(?:googletagmanager|google-analytics|doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>\s*<\/script>/gi, '');
+    const abs = new URL(from, location.href).href;
+    const base = '<base href="' + abs.slice(0, abs.lastIndexOf('/') + 1).replace(/"/g, '%22') + '">';
     const head = base + REPORTER;
     html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, (m) => m + head) : head + html;
     f.srcdoc = html;
@@ -175,7 +215,7 @@ function closePlayer() { playToken++; $('a-modal').classList.remove('open'); $('
 $('a-close').onclick = closePlayer;
 $('a-modal').addEventListener('click', (e) => { if (e.target === $('a-modal')) closePlayer(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('a-modal').classList.contains('open')) closePlayer(); });
-$('a-full').onclick = () => { const f = $('a-player'); (f.requestFullscreen || f.webkitRequestFullscreen)?.call(f); };
+$('a-full').onclick = () => { const f = $('a-stage'); (f.requestFullscreen || f.webkitRequestFullscreen)?.call(f); };
 
 /* ---------- loading the list ---------- */
 function load() {
@@ -187,7 +227,7 @@ function load() {
     .catch((e) => {
       st.hidden = false; st.className = 'adv-state err';
       st.textContent = 'Couldn’t load the game list (' + e.message + '). Your network may be blocking GitHub, or gn-math may have moved its files.';
-      $('a-tools').hidden = true; $('a-retry').hidden = false; $('a-site').hidden = false;
+      $('a-tools').hidden = true; $('a-retry').hidden = false;
     }).finally(() => { loading = null; });
   return loading;
 }
@@ -209,5 +249,7 @@ $('m-adv').addEventListener('click', () => setMode('advanced'));
 $('a-more').onclick = () => { limit += PAGE; render(); };
 let st; $('a-search').addEventListener('input', () => { clearTimeout(st); st = setTimeout(() => { limit = PAGE; render(); }, 120); });
 
+if (window.cstuff) fitOn = window.cstuff.get().fitGames !== false;
+setFitUi();
 const saved = window.cstuff ? window.cstuff.get().gamesMode : 'default';
 setMode(location.hash === '#advanced' || (location.hash !== '#default' && saved === 'advanced') ? 'advanced' : 'default', false);
