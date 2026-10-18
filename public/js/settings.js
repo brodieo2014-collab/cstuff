@@ -58,17 +58,3 @@ $('reset').addEventListener('click', () => {
   try { localStorage.removeItem('cstuff:settings'); } catch {}
   location.reload();
 });
-
-const cl = $('cloak');
-Object.entries(S.CLOAKS).forEach(([id, c]) => { const o = document.createElement('option'); o.value = id; o.textContent = c.name; cl.appendChild(o); });
-cl.value = cur.cloak;
-cl.addEventListener('change', () => { cur = S.set({ cloak: cl.value }); flash('Saved. Reload to see it'); });
-const pk = $('panic');
-const showKey = () => { pk.value = cur.panicKey || 'off'; };
-showKey();
-pk.addEventListener('keydown', (e) => {
-  e.preventDefault(); e.stopPropagation();
-  if (e.key === 'Tab' || e.key === 'Shift') return;
-  cur = S.set({ panicKey: e.key === 'Backspace' ? '' : e.key.length === 1 ? e.key : cur.panicKey });
-  showKey(); flash();
-});
