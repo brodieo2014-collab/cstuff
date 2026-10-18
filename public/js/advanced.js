@@ -178,7 +178,7 @@ async function playProxy(z, token) {
   const px = $('a-prox');
   $('a-diag').hidden = true;
   try {
-    const { getEngine } = await import('/js/engine.js?v=20261018i');
+    const { getEngine } = await import('/js/engine.js?v=20261018j');
     const sj = await getEngine();
     if (token !== playToken) return;
     if (!px._sj) px._sj = sj.createFrame(px);
@@ -187,6 +187,15 @@ async function playProxy(z, token) {
     if (token !== playToken) return;
     px._sj.go('http://' + info.host + ':' + info.port + RELAY + '/html/' + z.path);
     $('a-load').textContent = '';
+    const since = Date.now() - 1000; let logs = 0;
+    const checkLog = async () => {
+      if (token !== playToken) return;
+      try {
+        const l = await (await fetch(RELAY + '/_log?since=' + since)).json();
+        if (l.length > logs) { logs = l.length; diag = l.map((f) => f.p.replace(/^html\//, '') + ' → ' + f.why).slice(-8); showDiag(['Missing files: ' + diag.join(', ')]); }
+      } catch {}
+    };
+    [4000, 9000, 18000].forEach((ms) => setTimeout(checkLog, ms));
     clearInterval(measureTimer); let n = 0;
     measureTimer = setInterval(() => {
       if (token !== playToken || ++n > 8) return clearInterval(measureTimer);

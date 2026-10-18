@@ -38,6 +38,10 @@ app.use((req, res, next) => {
   if (req.hostname === GAME_HOST && !req.path.startsWith('/gm/')) return res.status(404).type('text').send('Not found');
   next();
 });
+// Remembers the last files the relay could not find, so the games page can show what is missing.
+const gmFails = [];
+const noteFail = (repo, rel, why) => { gmFails.push({ t: Date.now(), p: `${repo}/${rel}`.slice(0, 160), why }); if (gmFails.length > 40) gmFails.shift(); };
+app.get('/gm/_log', (req, res) => { res.set('Cache-Control', 'no-store'); res.json(gmFails.filter((f) => f.t >= (Number(req.query.since) || 0))); });
 app.get('/gm/_info', (_req, res) => res.json({ host: GAME_HOST, port: Number(PORT) }));
 
 app.get('/healthz', (_req, res) => res.type('text').send('ok'));
@@ -66,12 +70,13 @@ app.get('/gm/:repo/*path', async (req, res) => {
   const url = `${GM_UPSTREAM}/${repo}/main/${rel.split('/').map(encodeURIComponent).join('/')}`;
   const get = (u) => fetch(u, { signal: AbortSignal.timeout(30000), headers: { 'accept-encoding': 'identity' } }).catch(() => null);
   let up = await get(url);
-  if (!up) return res.status(502).type('text').send('Could not reach the game host');
+  if (!up) { noteFail(repo, rel, 'unreachable'); return res.status(502).type('text').send('Could not reach the game host'); }
   // Many games refer to files that live on the gn-math site itself rather than in the repo; try there on a 404.
   if (up.status === 404 && repo === 'html') {
     const alt = await get(`${GM_SITE}/${rel.split('/').map(encodeURIComponent).join('/')}`);
     if (alt && alt.ok && alt.body && !/text\/html/i.test(alt.headers.get('content-type') || '')) up = alt;
   }
+  if (!up.ok || !up.body) noteFail(repo, rel, 'HTTP ' + up.status);
   if (!up.ok || !up.body) return res.status(up.status === 404 ? 404 : 502).type('text').send('Upstream HTTP ' + up.status);
 
   const ext = path.extname(rel).toLowerCase();
