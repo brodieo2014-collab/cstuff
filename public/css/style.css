@@ -185,3 +185,6 @@ select:focus{border-color:var(--accent)}
 .adv-src{flex:1;color:var(--muted);font-size:.85rem;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #e-frame{display:block;width:100%;height:min(78vh,900px);min-height:420px;border:1px solid var(--line);border-radius:0 0 var(--radius) var(--radius);background:#fff}
 [hidden]{display:none!important}
+
+.diag{margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);font-size:.78rem;line-height:1.45;max-height:84px;overflow:auto;word-break:break-word}
+.diag b{color:#ff6b6b}

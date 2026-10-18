@@ -88,31 +88,89 @@ function render() {
 }
 
 /* ---------- player ---------- */
-let playToken = 0;
+const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
+async function download(url, onProgress) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const total = +r.headers.get('content-length') || 0;
+  if (!r.body || !r.body.getReader) return r.text();
+  const reader = r.body.getReader(), chunks = []; let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); got += value.length; onProgress(got, total);
+  }
+  return new Blob(chunks).text();
+}
+
+// Runs inside every game: reports script errors and files that fail to load back to the page.
+const REPORTER = '<script>(function(){function s(m){try{parent.postMessage({cstuff:"err",m:String(m).slice(0,240)},"*")}catch(e){}}' +
+  'addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&(t.src||t.href)){s("Failed to load: "+(t.src||t.href))}else{s(e.message||e.error)}},true);' +
+  'addEventListener("unhandledrejection",function(e){var r=e.reason;s("Promise: "+(r&&r.message||r))});})()<\/script>';
+
+let diag = [];
+function showDiag(lines) {
+  const box = $('a-diag'); box.textContent = '';
+  const t = document.createElement('b'); t.textContent = 'Problems: '; box.appendChild(t);
+  box.appendChild(document.createTextNode(lines.slice(-4).join('  ·  ')));
+  box.hidden = false;
+}
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (e.source !== $('a-player').contentWindow || !d || d.cstuff !== 'err' || typeof d.m !== 'string') return;
+  if (diag.length >= 25 || diag.includes(d.m)) return;
+  diag.push(d.m); showDiag(diag);
+});
+
+let playToken = 0, current = null;
+const SAFE = 'allow-scripts allow-pointer-lock allow-popups allow-forms allow-modals';
+const compatList = () => { try { const a = window.cstuff && window.cstuff.get().compat; return Array.isArray(a) ? a : []; } catch { return []; } };
+function setCompatUi(on) {
+  const b = $('a-compat'); b.setAttribute('aria-pressed', String(on)); b.textContent = 'Compatibility: ' + (on ? 'on' : 'off');
+}
 async function play(z) {
+  current = z;
   const token = ++playToken;
+  const compat = compatList().includes(z.path);
+  setCompatUi(compat);
   $('a-title').textContent = z.name; $('a-load').textContent = 'Loading…';
   $('a-modal').classList.add('open');
   const f = $('a-player'); f.srcdoc = '';
+  f.setAttribute('sandbox', compat ? SAFE + ' allow-same-origin' : SAFE);
+  $('a-diag').hidden = true; $('a-diag').textContent = ''; diag = [];
   try {
-    let html = null, from = '', err = 'no source';
+    let html = null, from = '';
+    const problems = [];
     for (const base of SOURCE.html) {
+      const url = base + '/' + z.path;
       try {
-        const r = await fetch(base + '/' + z.path);
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        html = await r.text(); from = base + '/' + z.path; break;
-      } catch (e) { err = e.message; if (token !== playToken) return; }
+        html = await download(url, (got, total) => {
+          if (token === playToken) $('a-load').textContent = 'Downloading ' + mb(got) + (total ? ' of ' + mb(total) : '') + '…';
+        });
+        from = url; break;
+      } catch (e) { problems.push(new URL(url).hostname + ': ' + e.message); if (token !== playToken) return; }
     }
     if (token !== playToken) return;
-    if (html == null) throw new Error(err);
+    if (html == null) throw new Error(problems.join(' | '));
     const base = '<base href="' + from.slice(0, from.lastIndexOf('/') + 1).replace(/"/g, '%22') + '">';
-    html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, '<head$1>' + base) : base + html;
+    const head = base + REPORTER;
+    html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, (m) => m + head) : head + html;
     f.srcdoc = html;
     $('a-load').textContent = '';
   } catch (e) {
-    if (token === playToken) $('a-load').textContent = 'Could not load this game (' + e.message + ').';
+    if (token === playToken) {
+      $('a-load').textContent = 'Could not load this game.';
+      showDiag(['Download failed: ' + e.message]);
+    }
   }
 }
+$('a-compat').onclick = () => {
+  if (!current || !window.cstuff) return;
+  const list = compatList(), on = list.includes(current.path);
+  if (!on && !confirm('Compatibility mode lets this game use browser storage like a normal website, which many games need to start.\n\nThe catch: the game\u2019s code can then read data this site keeps in your browser, including logins from sites you used through the proxy. Only turn it on for games you trust.\n\nTurn it on for this game?')) return;
+  window.cstuff.set({ compat: on ? list.filter((p) => p !== current.path) : [...list, current.path] });
+  play(current);
+};
 function closePlayer() { playToken++; $('a-modal').classList.remove('open'); $('a-player').srcdoc = ''; }
 $('a-close').onclick = closePlayer;
 $('a-modal').addEventListener('click', (e) => { if (e.target === $('a-modal')) closePlayer(); });
