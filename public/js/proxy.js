@@ -1,4 +1,4 @@
-import { getEngine } from '/js/engine.js';
+import { getEngine } from '/js/engine.js?v=20261017b';
 
 const $ = (id) => document.getElementById(id);
 const status = $('status');

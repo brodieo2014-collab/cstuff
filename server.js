@@ -21,7 +21,8 @@ app.disable('x-powered-by');
 app.get('/healthz', (_req, res) => res.type('text').send('ok'));
 
 const staticOpts = { maxAge: '1h' };
-app.use(express.static(path.join(__dirname, 'public'), staticOpts));
+// Site files are revalidated on every load so updates show up right away; the big proxy libraries can be cached.
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 app.use('/scram/', express.static(scramjetPath, staticOpts));
 app.use('/baremux/', express.static(baremuxPath, staticOpts));
 app.use('/epoxy/', express.static(epoxyPath, staticOpts));
