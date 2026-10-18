@@ -33,9 +33,15 @@ wisp.options.allow_loopback_ips = true; // safe: the resolver above only ever re
 const app = express();
 app.disable('x-powered-by');
 
-// Requests that arrive under the game host name (from the proxy) may only use the game relay.
+// Requests that arrive under the game host name (from the proxy) may only use the game relay and the static proxy libraries.
 app.use((req, res, next) => {
-  if (req.hostname === GAME_HOST && !req.path.startsWith('/gm/')) return res.status(404).type('text').send('Not found');
+  if (req.hostname === GAME_HOST) {
+    const allowed = ['/gm/', '/scram/', '/baremux/', '/epoxy/'];
+    for (const p of allowed) {
+      if (req.path.startsWith(p)) return next();
+    }
+    return res.status(404).type('text').send('Not found');
+  }
   next();
 });
 // Remembers the last files the relay could not find, so the games page can show what is missing.
@@ -103,7 +109,7 @@ async function relay(req, res, url, repo, label, rel) {
     // Games point some files at public CDNs; send them to this relay instead, and drop analytics scripts.
     let html = await up.text();
     html = html.replace(/(<base\s[^>]*href=["'])https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/([\w.\-]+)\/([\w.\-]+)@([\w.\-]+)\//gi, '$1/gm/x/$2/$3/$4/')
-      .replace(/https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, '/gm/$1/')
+      .replace(/https?:\/\/((?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net)\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, '/gm/$2/')
       .replace(/https?:\/\/raw\.githubusercontent\.com\/gn-math\/(html|assets|covers)\/(?:main|master)\//g, '/gm/$1/')
       .replace(/<script\b[^>]*src=["'][^"']*(?:googletagmanager|google-analytics|doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>\s*<\/script>/gi, '');
     res.set({ 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
