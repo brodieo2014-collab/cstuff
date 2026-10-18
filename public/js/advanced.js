@@ -178,7 +178,7 @@ async function playProxy(z, token) {
   const px = $('a-prox');
   $('a-diag').hidden = true;
   try {
-    const { getEngine } = await import('/js/engine.js?v=20261018k');
+    const { getEngine } = await import('/js/engine.js?v=20261018l');
     const sj = await getEngine();
     if (token !== playToken) return;
     if (!px._sj) px._sj = sj.createFrame(px);
