@@ -90,54 +90,74 @@ app.get('/gm/:repo/*path', (req, res) => {
 
 async function relay(req, res, url, repo, label, rel) {
   // Try fetching the upstream resource. Some hosts (YouTube, large CDNs) can be picky about TLS/user-agent
-  // and may close connections during handshake; retry with a browser-like User-Agent if the first attempt fails.
+  // and may close connections during handshake; retry with a browser-like User-Agent and multiple attempts.
   const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36';
-  const tryFetch = async (u, to, headers) => {
-    try {
-      return await fetch(u, { signal: AbortSignal.timeout(to), headers });
-    } catch (e) {
-      return { __error: e };
-    }
-  };
+  const headersBase = { 'accept-encoding': 'identity', 'accept': '*/*', 'accept-language': 'en-US,en;q=0.9' };
 
-  let up = await tryFetch(url, 30000, { 'accept-encoding': 'identity' });
-  if (!up || up.__error) {
-    // Retry once with a browser UA and a slightly longer timeout.
-    up = await tryFetch(url, 45000, { 'accept-encoding': 'identity', 'user-agent': BROWSER_UA });
-    if (up && up.__error) {
-      // log the error for admins and fall through to the normal failure path
-      noteFail(repo, label, String(up.__error && up.__error.message ? up.__error.message : 'fetch error'));
-      return res.status(502).type('text').send('Could not reach the game host');
+  // Try a small series of attempts with backoff; record the last error for logging.
+  let lastErr = null;
+  let up = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const timeout = 20000 + attempt * 15000; // 20s, 35s, 50s
+    const headers = Object.assign({}, headersBase, { 'user-agent': BROWSER_UA });
+    try {
+      up = await fetch(url, { signal: AbortSignal.timeout(timeout), headers });
+      if (up && up.ok && up.body) break; // success
+      lastErr = new Error('HTTP ' + (up ? up.status : 'no-response'));
+    } catch (e) {
+      lastErr = e;
+      // small backoff before retry
+      await new Promise((r) => setTimeout(r, 500 + attempt * 300));
     }
   }
 
-  if (!up.ok || !up.body) noteFail(repo, label, 'HTTP ' + up.status);
-  if (!up.ok || !up.body) return res.status(up.status === 404 ? 404 : 502).type('text').send('Upstream HTTP ' + up.status);
+  if (!up || !up.ok || !up.body) {
+    noteFail(repo, label, lastErr && lastErr.message ? lastErr.message : 'fetch error');
+    return res.status(up && up.status === 404 ? 404 : 502).type('text').send('Upstream HTTP ' + (up ? up.status : 'error'));
+  }
+
+  // Forward most upstream headers, but when serving via the GAME_HOST proxy, strip headers that prevent framing
+  // (X-Frame-Options, Content-Security-Policy frame-ancestors) so the iframe can render the proxied page.
+  const viaProxy = req.hostname === GAME_HOST;
+  const forbidden = new Set(['x-frame-options', 'content-security-policy', 'frame-ancestors']);
+  for (const [hk, hv] of up.headers) {
+    const lk = hk.toLowerCase();
+    if (viaProxy && forbidden.has(lk)) continue;
+    // content-length will be set below; avoid duplicating it here
+    if (lk === 'content-length') continue;
+    // Do not forward hop-by-hop headers (Connection, Keep-Alive, Transfer-Encoding etc.)
+    if (['connection', 'keep-alive', 'transfer-encoding', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailers', 'upgrade'].includes(lk)) continue;
+    try { res.set(hk, hv); } catch (e) { /* ignore header set errors */ }
+  }
 
   const ext = path.extname(rel).toLowerCase();
-  const viaProxy = req.hostname === GAME_HOST;
   res.type(ext || 'application/octet-stream');
-  if (!res.get('Content-Type')) res.type('application/octet-stream');
   const len = up.headers.get('content-length');
+
+  // If this is proxied HTML, rewrite CDN/raw references so games load through the same relay.
   if (viaProxy && ext === '.html' && len && Number(len) < 3e6) {
-    // Games point some files at public CDNs; send them to this relay instead, and drop analytics scripts.
     let html = await up.text();
     html = html.replace(/(<base\s[^>]*href=["'])https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/([\w.\-]+)\/([\w.\-]+)@([\w.\-]+)\//gi, '$1/gm/x/$2/$3/$4/')
       .replace(/https?:\/\/((?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net)\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, '/gm/$2/')
       .replace(/https?:\/\/raw\.githubusercontent\.com\/gn-math\/(html|assets|covers)\/(?:main|master)\//g, '/gm/$1/')
       .replace(/<script\b[^>]*src=["'][^"']*(?:googletagmanager|google-analytics|doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>\s*<\/script>/gi, '');
+    // Ensure we do not send framing CSP headers back when proxied
     res.set({ 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
     return res.type('text/html; charset=utf-8').send(html);
   }
+
   if (len) res.set('Content-Length', len);
-  res.set({
+  // Ensure permissive CORS and remove restrictive CSP for proxied responses so they can be framed.
+  const baseResHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Cross-Origin-Resource-Policy': 'cross-origin',
     'X-Content-Type-Options': 'nosniff',
-    // If someone opens a game page straight from this address, it runs in an opaque origin, never as cstuff.
-    ...(viaProxy ? {} : { 'Content-Security-Policy': 'sandbox allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock' }),
     'Cache-Control': 'public, max-age=86400',
-  });
+  };
+  if (!viaProxy) baseResHeaders['Content-Security-Policy'] = 'sandbox allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock';
+  // Apply headers (existing headers from upstream already set above will be preserved unless overridden here).
+  res.set(baseResHeaders);
+
   const body = Readable.fromWeb(up.body);
   body.on('error', () => res.destroy());
   res.on('close', () => body.destroy());
