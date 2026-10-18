@@ -84,7 +84,7 @@ app.get('/gm/:repo/*path', async (req, res) => {
   res.type(ext || 'application/octet-stream');
   if (!res.get('Content-Type')) res.type('application/octet-stream');
   const len = up.headers.get('content-length');
-  if (viaProxy && ext === '.html' && (!len || Number(len) < 8e6)) {
+  if (viaProxy && ext === '.html' && len && Number(len) < 3e6) {
     // Games point some files at public CDNs; send them to this relay instead, and drop analytics scripts.
     let html = await up.text();
     html = html.replace(/https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, '/gm/$1/')
@@ -112,6 +112,12 @@ app.get('/proxy', (_req, res) => res.redirect('/'));
 app.use((_req, res) => res.status(404).sendFile(path.join(__dirname, 'public', '404.html')));
 
 const server = http.createServer(app);
+// Long-lived proxy connections: keep sockets open longer than the platform's load balancer does.
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 70000;
+// A stray error in one request should never take the whole site (and every proxy connection) down.
+process.on('uncaughtException', (e) => console.error('uncaught:', e));
+process.on('unhandledRejection', (e) => console.error('unhandled:', e));
 
 // ---------- chat ----------
 const wss = new WebSocketServer({ noServer: true, maxPayload: 2048 });
