@@ -1,12 +1,17 @@
 /* Advanced games: cstuff's own cards and player, with the games sourced from gn-math.dev. */
 const $ = (id) => document.getElementById(id);
 
+// gn-math keeps its game list in the "assets" repo and the games/covers in the "html" and "covers" repos.
+// jsDelivr refuses the oversized assets repo (HTTP 403), so the list is also tried straight from GitHub.
+const GH = 'https://raw.githubusercontent.com/gn-math';
+const JSD = 'https://cdn.jsdelivr.net/gh/gn-math';
 const SOURCE = {
-  list: 'https://cdn.jsdelivr.net/gh/gn-math/assets@main/zones.json',
-  covers: 'https://cdn.jsdelivr.net/gh/gn-math/covers@main',
-  html: 'https://cdn.jsdelivr.net/gh/gn-math/html@main',
+  list: [GH + '/assets/main/zones.json', JSD + '/assets@main/zones.json', 'https://fastly.jsdelivr.net/gh/gn-math/assets@main/zones.json'],
+  covers: [JSD + '/covers@main', GH + '/covers/main'],
+  html: [JSD + '/html@main', GH + '/html/main'],
   site: 'https://gn-math.dev/',
 };
+const SKIP_SPECIAL = new Set(['flash', 'tools']); // Flash games need a plugin; tools aren't games.
 const LEAD = {
   default: 'Quick games that run right in your browser. Your best scores are saved on this device.',
   advanced: 'Bigger games sourced from gn-math.dev. Search, pick one and play.',
@@ -15,31 +20,49 @@ const PAGE = 60;
 
 let all = [], shown = [], limit = PAGE, loaded = false, loading = null;
 
-const fill = (s) => String(s || '').replace('{COVER_URL}', SOURCE.covers).replace('{HTML_URL}', SOURCE.html);
 const isHttps = (u) => /^https:\/\//i.test(u);
+// "{HTML_URL}/12.html" -> "12.html"; anything not on the expected host is dropped.
+const rel = (s, tag) => {
+  s = String(s || '');
+  if (!s.startsWith(tag + '/')) return '';
+  const p = s.slice(tag.length + 1);
+  return /(^|\/)\.\.(\/|$)|[\\:?#]|^\//.test(p) ? '' : p; // stay inside the game folder
+};
 
 function normalize(raw) {
   const arr = Array.isArray(raw) ? raw : (raw && (raw.zones || raw.games)) || [];
   const seen = new Set();
   return arr.map((z) => ({
-    id: z.id,
+    id: z && z.id,
     name: String((z && z.name) || '').trim(),
-    cover: fill(z && z.cover),
-    url: fill(z && z.url),
+    cover: rel(z && z.cover, '{COVER_URL}'),
+    path: rel(z && z.url, '{HTML_URL}'),
+    special: Array.isArray(z && z.special) ? z.special : [],
   })).filter((z) => {
-    if (!z.name || !isHttps(z.url) || seen.has(z.url)) return false;
-    seen.add(z.url); return true;
+    if (!z.name || !z.path || z.id < 0 || z.special.some((x) => SKIP_SPECIAL.has(x)) || seen.has(z.path)) return false;
+    seen.add(z.path); return true;
   }).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 
-async function fetchList() {
+async function getJSON(url, ms) {
   const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 20000);
+  const t = setTimeout(() => ctl.abort(), ms);
   try {
-    const r = await fetch(SOURCE.list, { signal: ctl.signal });
+    const r = await fetch(url, { signal: ctl.signal });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    return normalize(await r.json());
+    return await r.json();
   } finally { clearTimeout(t); }
+}
+async function fetchList() {
+  let last = null;
+  for (const u of SOURCE.list) {
+    try {
+      const list = normalize(await getJSON(u, 20000));
+      if (list.length) return list;
+      last = new Error('empty list');
+    } catch (e) { last = e; }
+  }
+  throw last || new Error('no source');
 }
 
 function render() {
@@ -49,10 +72,10 @@ function render() {
   shown.slice(0, limit).forEach((z) => {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'acard';
     const cv = document.createElement('span'); cv.className = 'cv';
-    if (isHttps(z.cover)) {
-      const img = document.createElement('img'); img.loading = 'lazy'; img.alt = ''; img.referrerPolicy = 'no-referrer'; img.src = z.cover;
-      img.onerror = () => { img.remove(); cv.textContent = '🎮'; };
-      cv.appendChild(img);
+    if (z.cover) {
+      const img = document.createElement('img'); img.loading = 'lazy'; img.alt = ''; img.referrerPolicy = 'no-referrer';
+      let k = 0; const next = () => { if (k < SOURCE.covers.length) img.src = SOURCE.covers[k++] + '/' + z.cover; else { img.remove(); cv.textContent = '🎮'; } };
+      img.onerror = next; next(); cv.appendChild(img);
     } else cv.textContent = '🎮';
     const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = z.name;
     b.append(cv, nm); b.onclick = () => play(z); grid.appendChild(b);
@@ -72,11 +95,17 @@ async function play(z) {
   $('a-modal').classList.add('open');
   const f = $('a-player'); f.srcdoc = '';
   try {
-    const r = await fetch(z.url);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    let html = await r.text();
+    let html = null, from = '', err = 'no source';
+    for (const base of SOURCE.html) {
+      try {
+        const r = await fetch(base + '/' + z.path);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        html = await r.text(); from = base + '/' + z.path; break;
+      } catch (e) { err = e.message; if (token !== playToken) return; }
+    }
     if (token !== playToken) return;
-    const base = '<base href="' + z.url.slice(0, z.url.lastIndexOf('/') + 1).replace(/"/g, '%22') + '">';
+    if (html == null) throw new Error(err);
+    const base = '<base href="' + from.slice(0, from.lastIndexOf('/') + 1).replace(/"/g, '%22') + '">';
     html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, '<head$1>' + base) : base + html;
     f.srcdoc = html;
     $('a-load').textContent = '';
@@ -90,43 +119,21 @@ $('a-modal').addEventListener('click', (e) => { if (e.target === $('a-modal')) c
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('a-modal').classList.contains('open')) closePlayer(); });
 $('a-full').onclick = () => { const f = $('a-player'); (f.requestFullscreen || f.webkitRequestFullscreen)?.call(f); };
 
-/* ---------- fallback: gn-math.dev itself, through the proxy ---------- */
-let embed = null;
-async function startEmbed() {
-  $('a-embed').hidden = false;
-  const st = (m, c = '') => { const s = $('e-status'); s.textContent = m; s.className = 'adv-src ' + c; };
-  if (embed) return;
-  st('Starting the proxy…');
-  try {
-    const { getEngine } = await import('/js/engine.js');
-    const sj = await getEngine();
-    embed = sj.createFrame($('e-frame'));
-    embed.addEventListener('urlchange', (e) => { if (e && e.url) st(String(e.url)); });
-    embed.go(SOURCE.site); st('Loading gn-math.dev…');
-    $('e-back').onclick = () => { try { embed.back(); } catch {} };
-    $('e-fwd').onclick = () => { try { embed.forward(); } catch {} };
-    $('e-reload').onclick = () => { try { embed.reload(); } catch {} };
-    $('e-home').onclick = () => embed.go(SOURCE.site);
-    $('e-full').onclick = () => { const f = $('e-frame'); (f.requestFullscreen || f.webkitRequestFullscreen)?.call(f); };
-  } catch (e) { embed = null; st('Could not start: ' + e.message, 'err'); }
-}
-
 /* ---------- loading the list ---------- */
 function load() {
   if (loaded) return;
   if (loading) return loading;
   const st = $('a-status'); st.hidden = false; st.className = 'adv-state'; st.textContent = 'Loading games…';
-  loading = fetchList().then((list) => {
-    if (!list.length) throw new Error('empty list');
-    all = list; loaded = true; render();
-  }).catch((e) => {
-    st.hidden = false; st.className = 'adv-state err';
-    st.textContent = 'Couldn’t load the game list (' + e.message + '). Showing gn-math.dev directly instead.';
-    $('a-search').closest('.adv-tools').hidden = true;
-    startEmbed();
-  }).finally(() => { loading = null; });
+  $('a-retry').hidden = true; $('a-site').hidden = true; $('a-tools').hidden = false;
+  loading = fetchList().then((list) => { all = list; loaded = true; render(); })
+    .catch((e) => {
+      st.hidden = false; st.className = 'adv-state err';
+      st.textContent = 'Couldn’t load the game list (' + e.message + '). Your network may be blocking GitHub, or gn-math may have moved its files.';
+      $('a-tools').hidden = true; $('a-retry').hidden = false; $('a-site').hidden = false;
+    }).finally(() => { loading = null; });
   return loading;
 }
+$('a-retry').onclick = () => load();
 
 /* ---------- mode switch ---------- */
 function setMode(mode, save = true) {
