@@ -61,22 +61,37 @@ const GM_SITE = (process.env.GM_SITE || 'https://gn-math.dev').replace(/\/$/, ''
 const GM_REPOS = new Set(['html', 'assets', 'covers']);
 const GM_PATH = /^[\w .@()+,\-]+(?:\/[\w .@()+,\-]+)*$/;
 
-app.get('/gm/:repo/*path', async (req, res) => {
+const GM_JSD = process.env.GM_JSD || 'https://cdn.jsdelivr.net/gh';
+const SEG = /^[\w.\-]+$/;
+const encRel = (rel) => rel.split('/').map(encodeURIComponent).join('/');
+// Games sometimes say "load my files from github.com/<owner>/<repo>" (through jsDelivr). Same relay, fixed host.
+app.get('/gm/x/:owner/:repo/:ref/*path', (req, res) => {
+  const { owner, repo, ref } = req.params;
+  const rel = [].concat(req.params.path || []).join('/');
+  if (!SEG.test(owner) || !SEG.test(repo) || !/^[\w.\-]+$/.test(ref) || rel.length > 400 || !GM_PATH.test(rel) || rel.split('/').some((p) => p === '.' || p === '..')) {
+    return res.status(404).type('text').send('Not found');
+  }
+  return relay(req, res, `${GM_JSD}/${owner}/${repo}@${ref}/${encRel(rel)}`, 'x', `${owner}/${repo}/${rel}`, rel);
+});
+app.get('/gm/:repo/*path', (req, res) => {
   const { repo } = req.params;
   const rel = [].concat(req.params.path || []).join('/');
   if (!GM_REPOS.has(repo) || rel.length > 400 || !GM_PATH.test(rel) || rel.split('/').some((p) => p === '.' || p === '..')) {
     return res.status(404).type('text').send('Not found');
   }
-  const url = `${GM_UPSTREAM}/${repo}/main/${rel.split('/').map(encodeURIComponent).join('/')}`;
+  return relay(req, res, `${GM_UPSTREAM}/${repo}/main/${encRel(rel)}`, repo, rel, rel);
+});
+
+async function relay(req, res, url, repo, label, rel) {
   const get = (u) => fetch(u, { signal: AbortSignal.timeout(30000), headers: { 'accept-encoding': 'identity' } }).catch(() => null);
   let up = await get(url);
-  if (!up) { noteFail(repo, rel, 'unreachable'); return res.status(502).type('text').send('Could not reach the game host'); }
+  if (!up) { noteFail(repo, label, 'unreachable'); return res.status(502).type('text').send('Could not reach the game host'); }
   // Many games refer to files that live on the gn-math site itself rather than in the repo; try there on a 404.
   if (up.status === 404 && repo === 'html') {
     const alt = await get(`${GM_SITE}/${rel.split('/').map(encodeURIComponent).join('/')}`);
     if (alt && alt.ok && alt.body && !/text\/html/i.test(alt.headers.get('content-type') || '')) up = alt;
   }
-  if (!up.ok || !up.body) noteFail(repo, rel, 'HTTP ' + up.status);
+  if (!up.ok || !up.body) noteFail(repo, label, 'HTTP ' + up.status);
   if (!up.ok || !up.body) return res.status(up.status === 404 ? 404 : 502).type('text').send('Upstream HTTP ' + up.status);
 
   const ext = path.extname(rel).toLowerCase();
@@ -87,7 +102,8 @@ app.get('/gm/:repo/*path', async (req, res) => {
   if (viaProxy && ext === '.html' && len && Number(len) < 3e6) {
     // Games point some files at public CDNs; send them to this relay instead, and drop analytics scripts.
     let html = await up.text();
-    html = html.replace(/https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, '/gm/$1/')
+    html = html.replace(/(<base\s[^>]*href=["'])https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/([\w.\-]+)\/([\w.\-]+)@([\w.\-]+)\//gi, '$1/gm/x/$2/$3/$4/')
+      .replace(/https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, '/gm/$1/')
       .replace(/https?:\/\/raw\.githubusercontent\.com\/gn-math\/(html|assets|covers)\/(?:main|master)\//g, '/gm/$1/')
       .replace(/<script\b[^>]*src=["'][^"']*(?:googletagmanager|google-analytics|doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>\s*<\/script>/gi, '');
     res.set({ 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
@@ -106,7 +122,7 @@ app.get('/gm/:repo/*path', async (req, res) => {
   body.on('error', () => res.destroy());
   res.on('close', () => body.destroy());
   body.pipe(res);
-});
+}
 
 app.get('/proxy', (_req, res) => res.redirect('/'));
 app.use((_req, res) => res.status(404).sendFile(path.join(__dirname, 'public', '404.html')));

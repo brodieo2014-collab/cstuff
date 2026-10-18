@@ -178,7 +178,7 @@ async function playProxy(z, token) {
   const px = $('a-prox');
   $('a-diag').hidden = true;
   try {
-    const { getEngine } = await import('/js/engine.js?v=20261018j');
+    const { getEngine } = await import('/js/engine.js?v=20261018k');
     const sj = await getEngine();
     if (token !== playToken) return;
     if (!px._sj) px._sj = sj.createFrame(px);
@@ -255,7 +255,19 @@ async function play(z) {
     // Drop analytics/ad scripts: they only add requests the school may block.
     html = html.replace(/<script\b[^>]*src=["'][^"']*(?:googletagmanager|google-analytics|doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>\s*<\/script>/gi, '');
     const abs = new URL(from, location.href).href;
-    const base = '<base href="' + abs.slice(0, abs.lastIndexOf('/') + 1).replace(/"/g, '%22') + '">';
+    let baseHref = abs.slice(0, abs.lastIndexOf('/') + 1);
+    // Some games set their own <base> (often a jsDelivr folder of another GitHub repo). Keep it, but fetch through the relay.
+    const own = /<base\s[^>]*href=["']([^"']+)["'][^>]*>/i.exec(html);
+    if (own) {
+      html = html.replace(own[0], '');
+      try {
+        const u = new URL(own[1], abs);
+        const m = /^\/gh\/([\w.\-]+)\/([\w.\-]+)@([\w.\-]+)\/(.*)$/.exec(u.pathname);
+        if (m && /(^|\.)jsdelivr\.net$/.test(u.hostname) && from.startsWith(RELAY + '/')) baseHref = location.origin + RELAY + '/x/' + m[1] + '/' + m[2] + '/' + m[3] + '/' + m[4];
+        else baseHref = u.href;
+      } catch {}
+    }
+    const base = '<base href="' + baseHref.replace(/"/g, '%22') + '">';
     const head = base + REPORTER;
     html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, (m) => m + head) : head + html;
     f.srcdoc = html;
