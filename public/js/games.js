@@ -235,11 +235,107 @@
     return () => removeEventListener('keydown', kd);
   }
 
+  /* ---------- Flappy Blob ---------- */
+  function flappy() {
+    const W = 360, H = 520, c = mkCanvas(W, H), x = c.getContext('2d');
+    let b, pipes, score, over, started, raf, frames;
+    const GAP = 140, SPEED = 2.4;
+    function reset() { b = { y: H / 2, vy: 0 }; pipes = []; score = 0; over = false; started = false; frames = 0; api.score(0); }
+    const flap = () => { if (over) { reset(); return; } started = true; b.vy = -7.2; };
+    function step() {
+      if (started && !over) {
+        frames++; b.vy += 0.45; b.y += b.vy;
+        if (frames % 95 === 1) pipes.push({ x: W + 10, top: 60 + Math.random() * (H - GAP - 140), done: false });
+        pipes.forEach((p) => (p.x -= SPEED)); pipes = pipes.filter((p) => p.x > -70);
+        for (const p of pipes) {
+          if (!p.done && p.x + 50 < 80) { p.done = true; score++; api.score(score); }
+          if (100 > p.x && 64 < p.x + 50 && (b.y - 14 < p.top || b.y + 14 > p.top + GAP)) over = true;
+        }
+        if (b.y > H - 20 || b.y < -20) over = true;
+        if (over) api.over(score);
+      }
+      x.fillStyle = '#000'; x.fillRect(0, 0, W, H);
+      x.fillStyle = '#7ccf5b'; pipes.forEach((p) => { x.fillRect(p.x, 0, 50, p.top); x.fillRect(p.x, p.top + GAP, 50, H - p.top - GAP); });
+      x.fillStyle = '#2a2a2f'; x.fillRect(0, H - 6, W, 6);
+      x.fillStyle = '#ff8a3d'; x.beginPath(); x.arc(82, b.y, 14, 0, 7); x.fill();
+      x.fillStyle = '#000'; x.beginPath(); x.arc(88, b.y - 4, 3, 0, 7); x.fill();
+      x.fillStyle = '#fff'; x.textAlign = 'center'; x.font = 'bold 22px sans-serif';
+      if (!started) x.fillText('Tap / Space to flap', W / 2, H / 2 + 60);
+      if (over) { x.fillStyle = 'rgba(0,0,0,.6)'; x.fillRect(0, 0, W, H); x.fillStyle = '#fff'; x.fillText('Game over — tap to retry', W / 2, H / 2); }
+      raf = requestAnimationFrame(step);
+    }
+    const kd = (e) => { if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w') { keyGuard(e); flap(); } };
+    addEventListener('keydown', kd);
+    c.addEventListener('mousedown', flap); c.addEventListener('touchstart', (e) => { e.preventDefault(); flap(); }, { passive: false });
+    reset(); raf = requestAnimationFrame(step);
+    return () => { cancelAnimationFrame(raf); removeEventListener('keydown', kd); };
+  }
+
+  /* ---------- Minesweeper ---------- */
+  function mines() {
+    const N = 9, M = 10;
+    const box = document.createElement('div'); box.className = 'g2048'; box.style.gridTemplateColumns = 'repeat(' + N + ',1fr)'; box.style.gap = '3px'; box.style.width = 'min(396px,100%)';
+    stage.appendChild(box);
+    let cells, over, first, flags, revealed, flagMode = false;
+    const nums = ['', '#5b8cff', '#7ccf5b', '#ff6b6b', '#b36bff', '#ff8a3d', '#2dd4bf', '#fff', '#8b8b93'];
+    const nb = (i) => { const r = (i / N) | 0, q = i % N, out = []; for (let a = -1; a <= 1; a++) for (let d = -1; d <= 1; d++) { if (!a && !d) continue; const rr = r + a, qq = q + d; if (rr >= 0 && rr < N && qq >= 0 && qq < N) out.push(rr * N + qq); } return out; };
+    function reset() {
+      cells = Array.from({ length: N * N }, () => ({ m: false, r: false, f: false, n: 0 }));
+      over = false; first = true; flags = 0; revealed = 0; api.score(0); box.textContent = '';
+      cells.forEach((cell, i) => {
+        const d = document.createElement('div'); d.className = 'cell'; d.style.fontSize = '1.1rem'; d.style.cursor = 'pointer'; d.style.userSelect = 'none';
+        d.addEventListener('click', () => act(i, flagMode)); d.addEventListener('contextmenu', (e) => { e.preventDefault(); act(i, true); });
+        box.appendChild(d); cell.el = d;
+      });
+      paint(); hint();
+    }
+    function hint() { $('g-hint').textContent = over ? 'Tap any square to play again.' : 'Click to dig. Right-click (or the flag button) to flag. Mines left: ' + (M - flags); }
+    function plant(safe) {
+      const bad = new Set([safe, ...nb(safe)]); let n = 0;
+      while (n < M) { const i = (Math.random() * N * N) | 0; if (!cells[i].m && !bad.has(i)) { cells[i].m = true; n++; } }
+      cells.forEach((cell, i) => (cell.n = nb(i).filter((j) => cells[j].m).length));
+    }
+    function reveal(i) {
+      const st = [i];
+      while (st.length) {
+        const k = st.pop(), cell = cells[k];
+        if (cell.r || cell.f) continue;
+        cell.r = true; revealed++;
+        if (cell.n === 0 && !cell.m) st.push(...nb(k));
+      }
+    }
+    function act(i, flag) {
+      if (over) { reset(); return; }
+      const cell = cells[i];
+      if (flag) { if (!cell.r) { cell.f = !cell.f; flags += cell.f ? 1 : -1; } paint(); hint(); return; }
+      if (cell.f || cell.r) return;
+      if (first) { plant(i); first = false; }
+      if (cell.m) { over = true; api.over(revealed); cells.forEach((q) => { if (q.m) q.r = true; }); paint(); hint(); return; }
+      reveal(i); api.score(revealed);
+      if (revealed === N * N - M) { over = true; api.over(revealed + 50); $('g-hint').textContent = 'You cleared the board! Tap to play again.'; paint(); return; }
+      paint(); hint();
+    }
+    function paint() {
+      cells.forEach((cell) => {
+        const d = cell.el;
+        if (cell.r) { d.style.background = cell.m ? '#ff4d5e' : '#0b0b0c'; d.style.color = nums[cell.n] || '#fff'; d.textContent = cell.m ? '✸' : (cell.n || ''); }
+        else { d.style.background = '#2a2a2f'; d.textContent = cell.f ? '⚑' : ''; d.style.color = '#ff8a3d'; }
+      });
+    }
+    const fb = document.createElement('button'); fb.textContent = '⚑ Flag mode: off'; fb.style.marginTop = '10px';
+    fb.onclick = () => { flagMode = !flagMode; fb.textContent = '⚑ Flag mode: ' + (flagMode ? 'on' : 'off'); };
+    stage.appendChild(fb); stage.style.flexDirection = 'column'; stage.style.alignItems = 'center';
+    reset();
+    return () => { stage.style.flexDirection = ''; stage.style.alignItems = ''; };
+  }
+
   const games = [
     { id: 'snake', name: 'Snake', em: '🐍', desc: 'Eat, grow, don\'t crash.', hint: 'Arrow keys / WASD or swipe.', run: snake },
     { id: 'bricks', name: 'Bricks', em: '🧱', desc: 'Smash every brick with the ball.', hint: 'Move mouse, touch, or use arrow keys.', run: bricks },
     { id: 'dash', name: 'Dash', em: '🦖', desc: 'Jump over the obstacles.', hint: 'Space / Up / tap to jump.', run: dash },
     { id: 'whack', name: 'Whack-a-Mole', em: '🔨', desc: '30 seconds. Hit them all.', hint: '', run: whack },
+    { id: 'flappy', name: 'Flappy Blob', em: '🟠', desc: 'Flap through the pipes.', hint: 'Space / click / tap to flap.', run: flappy },
+    { id: 'mines', name: 'Minesweeper', em: '💣', desc: 'Clear the board, avoid the mines.', hint: '', run: mines },
     { id: '2048', name: '2048', em: '🔢', desc: 'Merge tiles to reach 2048.', hint: '', run: g2048 },
   ];
 

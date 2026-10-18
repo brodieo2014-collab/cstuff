@@ -13,6 +13,23 @@ function flash(msg = 'Saved') {
 }
 
 bindToggle('t-leaves', 'leaves');
+
+const box = $('themes');
+function renderThemes() {
+  box.textContent = '';
+  Object.entries(S.THEMES).forEach(([id, t]) => {
+    const b = document.createElement('button');
+    b.className = 'theme'; b.type = 'button';
+    b.setAttribute('aria-pressed', String(S.get().theme === id));
+    const sw = document.createElement('span'); sw.className = 'sw';
+    [t.bg, t.card, t.accent].forEach((c) => { const i = document.createElement('i'); i.style.background = c; sw.appendChild(i); });
+    const name = document.createElement('span'); name.textContent = t.name;
+    b.append(sw, name);
+    b.addEventListener('click', () => { S.applyTheme(id); renderThemes(); flash(); });
+    box.appendChild(b);
+  });
+}
+renderThemes();
 bindToggle('t-auto', 'autoBlank');
 
 $('engine').value = cur.engine;

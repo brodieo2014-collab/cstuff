@@ -4,7 +4,15 @@
   if (window.cstuff && window.cstuff.get().leaves === false) { canvas.remove(); return; }
   const ctx = canvas.getContext('2d');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const colors = ['#c2410c', '#ea580c', '#f59e0b', '#b45309', '#9a3412', '#a16207', '#d97706', '#65a30d'];
+  const palette = () => {
+    const c = window.cstuff;
+    return (c && c.THEMES[c.get().theme].leaves) || ['#c2410c', '#ea580c', '#f59e0b', '#b45309', '#9a3412', '#a16207', '#d97706', '#65a30d'];
+  };
+  let colors = palette();
+  window.addEventListener('cstuff-theme', () => {
+    colors = palette();
+    leaves.forEach((l) => { l.color = colors[(Math.random() * colors.length) | 0]; });
+  });
   let w = 0, h = 0, dpr = 1, leaves = [];
 
   function resize() {

@@ -1,4 +1,4 @@
-import { BareMuxConnection } from '/baremux/index.mjs';
+import { getEngine } from '/js/engine.js';
 
 const $ = (id) => document.getElementById(id);
 const status = $('status');
@@ -6,58 +6,12 @@ const iframe = $('frame');
 const browser = $('browser');
 const urlBar = $('b-url');
 let ready = null;
-let sj, sjFrame;
-
-const SJ_STORES = ['config', 'cookies', 'redirectTrackers', 'referrerPolicies', 'publicSuffixList'];
-
-// Scramjet's service worker opens its database the moment it starts, before the page has created the
-// stores it needs. Creating them first (and repairing a half-made database) avoids that race.
-function openSjDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('$scramjet', 1);
-    req.onupgradeneeded = () => {
-      for (const n of SJ_STORES) if (!req.result.objectStoreNames.contains(n)) req.result.createObjectStore(n);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error('Storage is busy. Close other cstuff tabs and retry.'));
-  });
-}
-async function ensureSjDb() {
-  let db = await openSjDb();
-  if (SJ_STORES.every((n) => db.objectStoreNames.contains(n))) { db.close(); return; }
-  db.close();
-  await new Promise((res, rej) => {
-    const d = indexedDB.deleteDatabase('$scramjet');
-    d.onsuccess = res; d.onerror = () => rej(d.error); d.onblocked = () => rej(new Error('Storage is busy. Close other cstuff tabs and retry.'));
-  });
-  db = await openSjDb();
-  db.close();
-}
+let sjFrame;
 
 function say(msg, cls = '') { status.textContent = msg; status.className = 'status ' + cls; }
 
 async function init() {
-  if (!('serviceWorker' in navigator)) throw new Error('This browser does not support service workers.');
-  if (!window.isSecureContext) throw new Error('A secure (https) connection is required.');
-  await ensureSjDb();
-  await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-  await navigator.serviceWorker.ready;
-
-  const conn = new BareMuxConnection('/baremux/worker.js');
-  const wisp = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/wisp/';
-  await conn.setTransport('/epoxy/index.mjs', [{ wisp }]);
-
-  const { ScramjetController } = $scramjetLoadController();
-  sj = new ScramjetController({
-    prefix: '/scramjet/',
-    files: {
-      wasm: '/scram/scramjet.wasm.wasm',
-      all: '/scram/scramjet.all.js',
-      sync: '/scram/scramjet.sync.js',
-    },
-  });
-  await sj.init();
+  const sj = await getEngine();
   sjFrame = sj.createFrame(iframe);
   sjFrame.addEventListener('urlchange', (e) => {
     const u = e && e.url;

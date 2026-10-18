@@ -8,6 +8,7 @@
 <meta name="description" content="cstuff: a fast web proxy, free browser games and a live chat.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%82%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/css/style.css">
+<script src="/js/theme.js"></script>
 
 </head>
 <body>
@@ -22,9 +23,40 @@
 </header>
 <main>
   <h1>Games</h1>
-  <p class="lead">Quick games that run right in your browser. Your best scores are saved on this device.</p>
+  <p class="lead" id="mode-lead">Quick games that run right in your browser. Your best scores are saved on this device.</p>
+  <div class="seg" role="group" aria-label="Game mode">
+    <button type="button" id="m-default" aria-pressed="true">Default</button>
+    <button type="button" id="m-adv" aria-pressed="false">Advanced</button>
+  </div>
   <div class="grid" id="grid"></div>
+  <section id="adv" hidden>
+    <div class="adv-tools">
+      <input id="a-search" type="text" placeholder="Search games…" autocomplete="off" spellcheck="false" aria-label="Search games">
+      <span class="adv-count" id="a-count"></span>
+    </div>
+    <p class="adv-state" id="a-status">Loading games…</p>
+    <div class="grid agrid" id="a-grid"></div>
+    <div class="adv-more"><button id="a-more" hidden>Show more</button></div>
+    <div id="a-embed" hidden>
+      <div class="adv-bar">
+        <button id="e-back" title="Back" aria-label="Back">←</button>
+        <button id="e-fwd" title="Forward" aria-label="Forward">→</button>
+        <button id="e-reload" title="Reload" aria-label="Reload">⟳</button>
+        <button id="e-home" title="Back to the start">⌂</button>
+        <span class="adv-src" id="e-status"></span>
+        <button id="e-full" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+      </div>
+      <iframe id="e-frame" title="gn-math" allow="fullscreen; autoplay; gamepad; clipboard-write"></iframe>
+    </div>
+    <p class="note" style="margin:14px 0 0;text-align:left">Advanced games come from <a href="https://gn-math.dev" target="_blank" rel="noopener">gn-math.dev</a>, an outside site. cstuff doesn't host or control them, and some may not work in every browser.</p>
+  </section>
 </main>
+<div class="modal" id="a-modal">
+  <div class="panel wide">
+    <div class="hd"><span class="t" id="a-title"></span><span class="s" id="a-load"></span><button id="a-full">Fullscreen</button><button id="a-close">Close</button></div>
+    <iframe id="a-player" title="Game" sandbox="allow-scripts allow-pointer-lock allow-popups allow-forms allow-modals" allow="fullscreen; autoplay; gamepad; clipboard-write"></iframe>
+  </div>
+</div>
 <div class="modal" id="modal">
   <div class="panel">
     <div class="hd"><span class="t" id="g-title"></span><span class="s">Score <b id="g-score">0</b></span><span class="s">Best <b id="g-best">0</b></span><button id="g-close">Close</button></div>
@@ -35,5 +67,6 @@
 <script src="/js/core.js"></script>
 <script src="/js/leaves.js"></script>
 <script src="/js/games.js"></script>
+<script type="module" src="/js/advanced.js"></script>
 </body>
 </html>
