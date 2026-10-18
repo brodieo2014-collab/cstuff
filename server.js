@@ -89,14 +89,28 @@ app.get('/gm/:repo/*path', (req, res) => {
 });
 
 async function relay(req, res, url, repo, label, rel) {
-  const get = (u) => fetch(u, { signal: AbortSignal.timeout(30000), headers: { 'accept-encoding': 'identity' } }).catch(() => null);
-  let up = await get(url);
-  if (!up) { noteFail(repo, label, 'unreachable'); return res.status(502).type('text').send('Could not reach the game host'); }
-  // Many games refer to files that live on the gn-math site itself rather than in the repo; try there on a 404.
-  if (up.status === 404 && repo === 'html') {
-    const alt = await get(`${GM_SITE}/${rel.split('/').map(encodeURIComponent).join('/')}`);
-    if (alt && alt.ok && alt.body && !/text\/html/i.test(alt.headers.get('content-type') || '')) up = alt;
+  // Try fetching the upstream resource. Some hosts (YouTube, large CDNs) can be picky about TLS/user-agent
+  // and may close connections during handshake; retry with a browser-like User-Agent if the first attempt fails.
+  const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36';
+  const tryFetch = async (u, to, headers) => {
+    try {
+      return await fetch(u, { signal: AbortSignal.timeout(to), headers });
+    } catch (e) {
+      return { __error: e };
+    }
+  };
+
+  let up = await tryFetch(url, 30000, { 'accept-encoding': 'identity' });
+  if (!up || up.__error) {
+    // Retry once with a browser UA and a slightly longer timeout.
+    up = await tryFetch(url, 45000, { 'accept-encoding': 'identity', 'user-agent': BROWSER_UA });
+    if (up && up.__error) {
+      // log the error for admins and fall through to the normal failure path
+      noteFail(repo, label, String(up.__error && up.__error.message ? up.__error.message : 'fetch error'));
+      return res.status(502).type('text').send('Could not reach the game host');
+    }
   }
+
   if (!up.ok || !up.body) noteFail(repo, label, 'HTTP ' + up.status);
   if (!up.ok || !up.body) return res.status(up.status === 404 ? 404 : 502).type('text').send('Upstream HTTP ' + up.status);
 
