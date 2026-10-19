@@ -6,6 +6,18 @@ const scramjet = new ScramjetServiceWorker();
 const PREFIX = '/scramjet/';
 let configApplied = false;
 
+// The games page is cross-origin isolated, which requires every page and worker inside it to say so too.
+function isolate(res, dest) {
+  if (!['document', 'iframe', 'frame', 'worker', 'sharedworker'].includes(dest)) return res;
+  if (!res || res.type === 'opaque' || res.type === 'opaqueredirect' || res.status === 0) return res;
+  try {
+    const h = new Headers(res.headers);
+    h.set('Cross-Origin-Embedder-Policy', 'credentialless');
+    h.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+  } catch { return res; }
+}
+
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
@@ -22,7 +34,7 @@ self.addEventListener('fetch', (event) => {
         await scramjet.loadConfig();
         configApplied = !!scramjet.config;
       }
-      if (scramjet.route(event)) return await scramjet.fetch(event);
+      if (scramjet.route(event)) return isolate(await scramjet.fetch(event), event.request.destination);
       return await fetch(event.request);
     } catch (err) {
       return new Response('cstuff proxy error: ' + (err && (err.stack || err.message) || err), { status: 502, headers: { 'content-type': 'text/plain' } });

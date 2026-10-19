@@ -12,7 +12,7 @@ const SOURCE = {
   html: [RELAY + '/html'],
   site: 'https://gn-math.dev/',
 };
-const SKIP_SPECIAL = new Set(['flash', 'tools']); // Flash games need a plugin; tools aren't games.
+const SKIP_SPECIAL = new Set(['tools']); // tools aren't games. Flash games run through Ruffle, loaded through the relay.
 const LEAD = {
   default: 'Quick games that run right in your browser. Your best scores are saved on this device.',
   advanced: 'Bigger games sourced from gn-math.dev. Search, pick one and play.',
@@ -66,9 +66,13 @@ async function fetchList() {
   throw last || new Error('no source');
 }
 
+const hiddenList = () => { try { const a = window.cstuff && window.cstuff.get().hiddenGames; return Array.isArray(a) ? a : []; } catch { return []; } };
+let showHidden = false;
 function render() {
   const q = $('a-search').value.trim().toLowerCase();
-  shown = q ? all.filter((z) => z.name.toLowerCase().includes(q)) : all;
+  const hid = new Set(hiddenList());
+  const pool = showHidden ? all : all.filter((z) => !hid.has(z.path));
+  shown = q ? pool.filter((z) => z.name.toLowerCase().includes(q)) : pool;
   const grid = $('a-grid'); grid.textContent = '';
   shown.slice(0, limit).forEach((z) => {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'acard';
@@ -82,7 +86,8 @@ function render() {
     b.append(cv, nm); b.onclick = () => play(z); grid.appendChild(b);
   });
   $('a-more').hidden = shown.length <= limit;
-  $('a-count').textContent = shown.length + (shown.length === 1 ? ' game' : ' games');
+  $('a-count').textContent = shown.length + (shown.length === 1 ? ' game' : ' games') + (hid.size ? ' · ' + hid.size + ' hidden' : '');
+  const hb = $('a-unhide'); hb.hidden = !hid.size; hb.textContent = showHidden ? 'Hide them again' : 'Show hidden';
   const st = $('a-status');
   if (!shown.length) { st.textContent = q ? 'No games match “' + $('a-search').value.trim() + '”.' : 'No games found.'; st.className = 'adv-state'; st.hidden = false; }
   else st.hidden = true;
@@ -104,8 +109,61 @@ async function download(url, onProgress) {
   return new Blob(chunks).text();
 }
 
+// Games in the locked-down frame cannot use browser storage, and many crash without it. This stands in for
+// localStorage, sessionStorage and cookies, and hands saves to the page so progress survives a reload.
+function storageShim(seed) {
+  var need = false;
+  try { void window.localStorage; window.localStorage.getItem('x'); } catch (e) { need = true; }
+  if (!need) return;
+  var saved = {}; try { saved = JSON.parse(seed) || {}; } catch (e) {}
+  var L = saved.l || {}, S = {}, timer = 0;
+  function save() { clearTimeout(timer); timer = setTimeout(function () { try { parent.postMessage({ cstuff: 'save', d: JSON.stringify({ l: L }) }, '*'); } catch (e) {} }, 600); }
+  function store(o, persist) {
+    var m = {
+      getItem: function (k) { k = String(k); return Object.prototype.hasOwnProperty.call(o, k) ? o[k] : null; },
+      setItem: function (k, v) { o[String(k)] = String(v); if (persist) save(); },
+      removeItem: function (k) { delete o[String(k)]; if (persist) save(); },
+      clear: function () { for (var k in o) delete o[k]; if (persist) save(); },
+      key: function (i) { return Object.keys(o)[i] || null; }
+    };
+    return new Proxy(m, {
+      get: function (t, p) { if (p === 'length') return Object.keys(o).length; if (p in t) return t[p]; return Object.prototype.hasOwnProperty.call(o, p) ? o[p] : undefined; },
+      set: function (t, p, v) { t.setItem(p, v); return true; },
+      deleteProperty: function (t, p) { t.removeItem(p); return true; },
+      has: function (t, p) { return p in t || Object.prototype.hasOwnProperty.call(o, p); },
+      ownKeys: function () { return Object.keys(o); },
+      getOwnPropertyDescriptor: function (t, p) { return Object.prototype.hasOwnProperty.call(o, p) ? { value: o[p], enumerable: true, configurable: true } : undefined; }
+    });
+  }
+  try { Object.defineProperty(window, 'localStorage', { get: function () { return lsx; }, configurable: true }); } catch (e) {}
+  try { Object.defineProperty(window, 'sessionStorage', { get: function () { return ssx; }, configurable: true }); } catch (e) {}
+  var lsx = store(L, true), ssx = store(S, false);
+  var jar = {};
+  try {
+    Object.defineProperty(document, 'cookie', {
+      configurable: true,
+      get: function () { return Object.keys(jar).map(function (k) { return k + '=' + jar[k]; }).join('; '); },
+      set: function (v) {
+        var parts = String(v).split(';'), kv = parts[0], i = kv.indexOf('=');
+        if (i < 0) return;
+        var k = kv.slice(0, i).trim(), val = kv.slice(i + 1).trim(), gone = false;
+        for (var j = 1; j < parts.length; j++) {
+          var a = parts[j].trim().toLowerCase();
+          if (a.indexOf('expires=') === 0 && new Date(a.slice(8)).getTime() < Date.now()) gone = true;
+          if (a.indexOf('max-age=') === 0 && parseInt(a.slice(8), 10) <= 0) gone = true;
+        }
+        if (gone) delete jar[k]; else jar[k] = val;
+      }
+    });
+  } catch (e) {}
+}
+const shimTag = (seed) => '<script>(' + storageShim.toString() + ')(' + JSON.stringify(seed || '{}').replace(/</g, '\\u003c').replace(/\u2028|\u2029/g, '') + ')<\/script>';
+const saveKey = (z) => 'cstuff:save:' + z.path;
+
 // Runs inside every game: reports script errors and files that fail to load back to the page.
-const REPORTER = '<script>(function(){function s(m){try{parent.postMessage({cstuff:"err",m:String(m).slice(0,240)},"*")}catch(e){}}' +
+const REPORTER = '<script>(function(){function mk(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}},key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}' +
+  '["localStorage","sessionStorage"].forEach(function(n){try{window[n].length}catch(e){try{Object.defineProperty(window,n,{value:mk(),configurable:true})}catch(_){}}});' +
+  'function s(m){try{parent.postMessage({cstuff:"err",m:String(m).slice(0,240)},"*")}catch(e){}}' +
   'addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&(t.src||t.href)){s("Failed to load: "+(t.src||t.href))}else{s(e.message||e.error)}},true);' +
   'addEventListener("unhandledrejection",function(e){var r=e.reason;s("Promise: "+(r&&r.message||r))});' +
   'function m(){var b=null,q=document.querySelectorAll("canvas,embed,object,iframe,video");for(var i=0;i<q.length;i++){var r=q[i].getBoundingClientRect();if(r.width<2||r.height<2)continue;var c=getComputedStyle(q[i]);if(c.visibility==="hidden"||c.display==="none")continue;var a=r.width*r.height;if(!b||a>b.a)b={a:a,w:r.width,h:r.height,l:r.left,t:r.top}}' +
@@ -141,19 +199,29 @@ $('a-fit').onclick = () => {
 new ResizeObserver(() => { if (fitBox) applyFit(); }).observe($('a-stage'));
 
 let diag = [];
+function tipFor(lines) {
+  const t = lines.join(' ');
+  if (proxMode) return '';
+  const compatOn = current && compatList().includes(current.path);
+  if (!compatOn && /indexeddb|storage|securityerror|quota/i.test(t)) return '   —   Tip: this game wants browser storage. Try Compatibility.';
+  return '   —   Tip: try the Proxy button above.';
+}
 function showDiag(lines) {
   const box = $('a-diag'); box.textContent = '';
   const t = document.createElement('b'); t.textContent = 'Problems: '; box.appendChild(t);
-  box.appendChild(document.createTextNode(lines.slice(-8).join('  ·  ') + (proxMode ? '' : '   —   Tip: try the Proxy button above.')));
+  box.appendChild(document.createTextNode(lines.slice(-8).join('  ·  ') + tipFor(lines)));
   box.hidden = false;
 }
 addEventListener('message', (e) => {
   const d = e.data;
   if (e.source !== $('a-player').contentWindow || !d) return;
   if (d.cstuff === 'size') return onSize(d);
+  if (d.cstuff === 'save' && typeof d.d === 'string' && d.d.length < 4e5 && current) { try { localStorage.setItem(saveKey(current), d.d); } catch {} return; }
   if (d.cstuff !== 'err' || typeof d.m !== 'string') return;
   if (diag.length >= 25 || diag.includes(d.m)) return;
-  diag.push(d.m); showDiag(diag);
+  diag.push(d.m);
+  if (/indexeddb|SecurityError|storage/i.test(d.m) && !diag.includes(COMPAT_TIP)) diag.push(COMPAT_TIP);
+  showDiag(diag);
   // For files served by our own relay, ask it why it failed so the message says more than "failed to load".
   const mm = /^Failed to load: (\S+\/gm\/[^\s]+)$/.exec(d.m);
   if (mm && !whyDone.has(mm[1])) {
@@ -166,9 +234,10 @@ addEventListener('message', (e) => {
   }
 });
 const whyDone = new Set();
+const COMPAT_TIP = 'This game wants browser storage: try the Compatibility button.';
 
 let playToken = 0, current = null;
-const SAFE = 'allow-scripts allow-pointer-lock allow-popups allow-forms allow-modals';
+const SAFE = 'allow-scripts allow-pointer-lock allow-popups allow-forms allow-modals allow-downloads';
 const compatList = () => { try { const a = window.cstuff && window.cstuff.get().compat; return Array.isArray(a) ? a : []; } catch { return []; } };
 const proxList = () => { try { const a = window.cstuff && window.cstuff.get().proxied; return Array.isArray(a) ? a : []; } catch { return []; } };
 const wantsProxy = (z) => { try { return !!window.cstuff.get().proxyGames || proxList().includes(z.path); } catch { return false; } };
@@ -178,7 +247,7 @@ async function playProxy(z, token) {
   const px = $('a-prox');
   $('a-diag').hidden = true;
   try {
-    const { getEngine } = await import('/js/engine.js?v=20261018l');
+    const { getEngine } = await import('/js/engine.js?v=20261018n');
     const sj = await getEngine();
     if (token !== playToken) return;
     if (!px._sj) px._sj = sj.createFrame(px);
@@ -268,7 +337,8 @@ async function play(z) {
       } catch {}
     }
     const base = '<base href="' + baseHref.replace(/"/g, '%22') + '">';
-    const head = base + REPORTER;
+    let seed = '{}'; try { seed = localStorage.getItem(saveKey(z)) || '{}'; } catch {}
+    const head = base + shimTag(seed) + REPORTER;
     html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, (m) => m + head) : head + html;
     f.srcdoc = html;
     $('a-load').textContent = '';
@@ -279,6 +349,13 @@ async function play(z) {
     }
   }
 }
+$('a-hide').onclick = () => {
+  if (!current || !window.cstuff) return;
+  const list = hiddenList();
+  if (!list.includes(current.path)) window.cstuff.set({ hiddenGames: [...list, current.path] });
+  closePlayer(); render();
+};
+$('a-unhide').onclick = () => { showHidden = !showHidden; if (!showHidden && !hiddenList().length) showHidden = false; render(); };
 $('a-px').onclick = () => {
   if (!current || !window.cstuff) return;
   if (window.cstuff.get().proxyGames) { alert('Proxy is on for every game (Settings → Games). Turn that off there to change it per game.'); return; }
@@ -293,6 +370,11 @@ $('a-compat').onclick = () => {
   window.cstuff.set({ compat: on ? list.filter((p) => p !== current.path) : [...list, current.path] });
   play(current);
 };
+$('a-player').addEventListener('load', () => { try { $('a-player').focus(); } catch {} });
+$('a-prox').addEventListener('load', () => { try { $('a-prox').focus(); } catch {} });
+$('a-stage').addEventListener('pointerdown', () => { try { af().focus(); } catch {} });
+new MutationObserver(() => { document.documentElement.style.overflow = $('a-modal').classList.contains('open') ? 'hidden' : ''; })
+  .observe($('a-modal'), { attributes: true, attributeFilter: ['class'] });
 function closePlayer() { playToken++; clearInterval(measureTimer); try { $('a-prox').src = 'about:blank'; } catch {} $('a-prox').hidden = true; $('a-modal').classList.remove('open'); $('a-player').srcdoc = ''; }
 $('a-close').onclick = closePlayer;
 $('a-modal').addEventListener('click', (e) => { if (e.target === $('a-modal')) closePlayer(); });

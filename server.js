@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import compression from 'compression';
 import { WebSocketServer } from 'ws';
 import { server as wisp } from '@mercuryworkshop/wisp-js/server';
 import { scramjetPath } from '@mercuryworkshop/scramjet/path';
@@ -32,6 +33,7 @@ wisp.options.allow_loopback_ips = true; // safe: the resolver above only ever re
 
 const app = express();
 app.disable('x-powered-by');
+app.use(compression()); // game files (pages, scripts, wasm) shrink a lot
 
 // Requests that arrive under the game host name (from the proxy) may only use the game relay.
 app.use((req, res, next) => {
@@ -44,6 +46,11 @@ const noteFail = (repo, rel, why) => { gmFails.push({ t: Date.now(), p: `${repo}
 app.get('/gm/_log', (req, res) => { res.set('Cache-Control', 'no-store'); res.json(gmFails.filter((f) => f.t >= (Number(req.query.since) || 0))); });
 app.get('/gm/_info', (_req, res) => res.json({ host: GAME_HOST, port: Number(PORT) }));
 
+// Lets games that need SharedArrayBuffer (multi-threaded engines) work: the games page becomes cross-origin isolated.
+app.use((req, res, next) => {
+  if (req.path === '/games.html') { res.set({ 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless' }); }
+  next();
+});
 app.get('/healthz', (_req, res) => res.type('text').send('ok'));
 
 const staticOpts = { maxAge: '1h' };
@@ -61,6 +68,7 @@ const GM_SITE = (process.env.GM_SITE || 'https://gn-math.dev').replace(/\/$/, ''
 const GM_REPOS = new Set(['html', 'assets', 'covers']);
 const GM_PATH = /^[\w .@()+,\-]+(?:\/[\w .@()+,\-]+)*$/;
 
+const GM_RAW = process.env.GM_RAW || 'https://raw.githubusercontent.com';
 const GM_JSD = process.env.GM_JSD || 'https://cdn.jsdelivr.net/gh';
 const SEG = /^[\w.\-]+$/;
 const encRel = (rel) => rel.split('/').map(encodeURIComponent).join('/');
@@ -71,7 +79,22 @@ app.get('/gm/x/:owner/:repo/:ref/*path', (req, res) => {
   if (!SEG.test(owner) || !SEG.test(repo) || !/^[\w.\-]+$/.test(ref) || rel.length > 400 || !GM_PATH.test(rel) || rel.split('/').some((p) => p === '.' || p === '..')) {
     return res.status(404).type('text').send('Not found');
   }
-  return relay(req, res, `${GM_JSD}/${owner}/${repo}@${ref}/${encRel(rel)}`, 'x', `${owner}/${repo}/${rel}`, rel);
+  // jsDelivr refuses big files (over about 20 MB), so fall back to GitHub's own raw host for those.
+  const rawRef = ref === 'latest' ? 'HEAD' : ref;
+  return relay(req, res, `${GM_JSD}/${owner}/${repo}@${ref}/${encRel(rel)}`, 'x', `${owner}/${repo}/${rel}`, rel,
+    [`${GM_RAW}/${owner}/${repo}/${rawRef}/${encRel(rel)}`]);
+});
+// Other public CDNs games lean on (Ruffle for Flash games, libraries, fonts), through the same relay.
+const H_HOSTS = new Set(['unpkg.com', 'cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com']);
+app.get('/gm/h/:host/*path', (req, res) => {
+  const { host } = req.params;
+  const rel = [].concat(req.params.path || []).join('/');
+  const qi = req.originalUrl.indexOf('?');
+  const query = qi >= 0 ? req.originalUrl.slice(qi) : '';
+  if (!H_HOSTS.has(host) || rel.length > 400 || !GM_PATH.test(rel) || rel.split('/').some((p) => p === '.' || p === '..') || (query && !/^\?[\w=&.,:+%@|;\-]{1,300}$/.test(query))) {
+    return res.status(404).type('text').send('Not found');
+  }
+  return relay(req, res, `${process.env.GM_H_BASE || 'https:/'}/${host}/${encRel(rel)}${query}`, 'h', `${host}/${rel}`, rel);
 });
 app.get('/gm/:repo/*path', (req, res) => {
   const { repo } = req.params;
@@ -82,42 +105,62 @@ app.get('/gm/:repo/*path', (req, res) => {
   return relay(req, res, `${GM_UPSTREAM}/${repo}/main/${encRel(rel)}`, repo, rel, rel);
 });
 
-async function relay(req, res, url, repo, label, rel) {
-  const get = (u) => fetch(u, { signal: AbortSignal.timeout(30000), headers: { 'accept-encoding': 'identity' } }).catch(() => null);
-  let up = await get(url);
-  if (!up) { noteFail(repo, label, 'unreachable'); return res.status(502).type('text').send('Could not reach the game host'); }
-  // Many games refer to files that live on the gn-math site itself rather than in the repo; try there on a 404.
-  if (up.status === 404 && repo === 'html') {
-    const alt = await get(`${GM_SITE}/${rel.split('/').map(encodeURIComponent).join('/')}`);
-    if (alt && alt.ok && alt.body && !/text\/html/i.test(alt.headers.get('content-type') || '')) up = alt;
+const TEXTY = new Set(['.html', '.htm', '.js', '.mjs', '.json', '.css']);
+function rewriteText(t, isHtml) {
+  t = t
+    .replace(/(?:https?:)?\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/gn-math\/(html|assets|covers)@(?:main|master|latest)\//g, '/gm/$1/')
+    .replace(/https?:\/\/raw\.githubusercontent\.com\/gn-math\/(html|assets|covers)\/(?:main|master|HEAD)\//g, '/gm/$1/')
+    .replace(/(?:https?:)?\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/([\w.\-]+)\/([\w.\-]+)@([\w.\-]+)\//g, '/gm/x/$1/$2/$3/')
+    .replace(/https?:\/\/raw\.githubusercontent\.com\/([\w.\-]+)\/([\w.\-]+)\/([\w.\-]+)\//g, '/gm/x/$1/$2/$3/')
+    .replace(/(?:https?:)?\/\/(unpkg\.com|cdnjs\.cloudflare\.com|fonts\.googleapis\.com|fonts\.gstatic\.com)\//g, '/gm/h/$1/')
+    .replace(/(?:https?:)?\/\/cdn\.jsdelivr\.net\/npm\//g, '/gm/h/cdn.jsdelivr.net/npm/');
+  if (isHtml) t = t.replace(/<script\b[^>]*src=["'][^"']*(?:googletagmanager|google-analytics|doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>\s*<\/script>/gi, '');
+  return t;
+}
+async function relay(req, res, url, repo, label, rel, alts = []) {
+  // The time limit covers connecting and the response headers only, so big downloads are not cut off midway.
+  const get = (u) => {
+    const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 30000);
+    return fetch(u, { signal: ac.signal, headers: { 'accept-encoding': 'identity' } }).catch(() => null).finally(() => clearTimeout(timer));
+  };
+  const tryList = [url, ...alts];
+  if (repo === 'html') tryList.push(`${GM_SITE}/${encRel(rel)}`); // some games refer to files that live on the gn-math site itself
+  let up = null, reached = false;
+  for (const u of tryList) {
+    const r = await get(u);
+    if (!r) continue;
+    reached = true;
+    if (!r.ok || !r.body) { if (!up) up = r; continue; }
+    if (u !== url && /text\/html/i.test(r.headers.get('content-type') || '')) continue; // a web page is not a game file
+    up = r; break;
   }
+  if (!reached) { noteFail(repo, label, 'unreachable'); return res.status(502).type('text').send('Could not reach the game host'); }
   if (!up.ok || !up.body) noteFail(repo, label, 'HTTP ' + up.status);
   if (!up.ok || !up.body) return res.status(up.status === 404 ? 404 : 502).type('text').send('Upstream HTTP ' + up.status);
 
-  const ext = path.extname(rel).toLowerCase();
+  let ext = path.extname(rel).toLowerCase();
+  if (!ext) { const ct = up.headers.get('content-type') || ''; ext = /css/i.test(ct) ? '.css' : /javascript/i.test(ct) ? '.js' : /json/i.test(ct) ? '.json' : ''; }
   const viaProxy = req.hostname === GAME_HOST;
   res.type(ext || 'application/octet-stream');
   if (!res.get('Content-Type')) res.type('application/octet-stream');
   const len = up.headers.get('content-length');
-  if (viaProxy && ext === '.html' && len && Number(len) < 3e6) {
-    // Games point some files at public CDNs; send them to this relay instead, and drop analytics scripts.
-    let html = await up.text();
-    html = html.replace(/(<base\s[^>]*href=["'])https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/([\w.\-]+)\/([\w.\-]+)@([\w.\-]+)\//gi, '$1/gm/x/$2/$3/$4/')
-      .replace(/https?:\/\/(?:cdn|fastly|gcore|testingcf)\.jsdelivr\.net\/gh\/gn-math\/(html|assets|covers)@(?:main|master)\//g, '/gm/$1/')
-      .replace(/https?:\/\/raw\.githubusercontent\.com\/gn-math\/(html|assets|covers)\/(?:main|master)\//g, '/gm/$1/')
-      .replace(/<script\b[^>]*src=["'][^"']*(?:googletagmanager|google-analytics|doubleclick|googlesyndication|adsbygoogle)[^"']*["'][^>]*>\s*<\/script>/gi, '');
-    res.set({ 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
-    return res.type('text/html; charset=utf-8').send(html);
-  }
-  if (len) res.set('Content-Length', len);
-  res.set({
+  const headers = {
     'Access-Control-Allow-Origin': '*',
     'Cross-Origin-Resource-Policy': 'cross-origin',
     'X-Content-Type-Options': 'nosniff',
     // If someone opens a game page straight from this address, it runs in an opaque origin, never as cstuff.
     ...(viaProxy ? {} : { 'Content-Security-Policy': 'sandbox allow-scripts allow-popups allow-forms allow-modals allow-pointer-lock' }),
-    'Cache-Control': 'public, max-age=86400',
-  });
+    'Cache-Control': viaProxy ? 'no-cache' : 'public, max-age=86400',
+  };
+  if (TEXTY.has(ext) && len && Number(len) < 3e6) {
+    // Games point some files at public CDNs and GitHub; send those requests through this relay instead.
+    // Small text files (pages, scripts, data) are rewritten; big files and media are streamed untouched.
+    const text = rewriteText(await up.text(), ext === '.html' || ext === '.htm');
+    res.set(headers);
+    return res.send(text);
+  }
+  if (len) res.set('Content-Length', len);
+  res.set(headers);
   const body = Readable.fromWeb(up.body);
   body.on('error', () => res.destroy());
   res.on('close', () => body.destroy());

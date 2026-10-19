@@ -7,8 +7,8 @@
 <title>cstuff — games</title>
 <meta name="description" content="cstuff: a fast web proxy, free browser games and a live chat.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%82%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="/css/style.css?v=20261018l">
-<script src="/js/theme.js?v=20261018l"></script>
+<link rel="stylesheet" href="/css/style.css?v=20261018n">
+<script src="/js/theme.js?v=20261018n"></script>
 
 </head>
 <body>
@@ -32,7 +32,7 @@
   <section id="adv" hidden>
     <div class="adv-tools" id="a-tools">
       <input id="a-search" type="text" placeholder="Search games…" autocomplete="off" spellcheck="false" aria-label="Search games">
-      <span class="adv-count" id="a-count"></span>
+      <span class="adv-count" id="a-count"></span> <button id="a-unhide" type="button" hidden style="padding:4px 10px;font-size:.8rem">Show hidden</button>
     </div>
     <p class="adv-state" id="a-status">Loading games…</p>
     <div class="grid agrid" id="a-grid"></div>
@@ -43,8 +43,8 @@
 </main>
 <div class="modal" id="a-modal">
   <div class="panel wide">
-    <div class="hd"><span class="t" id="a-title"></span><span class="s" id="a-load"></span><button id="a-fit" type="button" aria-pressed="true" title="Scale small or off-center games to fill this window">Fit: on</button><button id="a-px" type="button" aria-pressed="false" title="Runs the game through the cstuff proxy, like a website. Slower, but works for games that break otherwise.">Proxy: off</button><button id="a-compat" type="button" aria-pressed="false" title="Lets the game use browser storage, which many games need. Less safe.">Compatibility: off</button><button id="a-full">Fullscreen</button><button id="a-close">Close</button></div>
-    <div id="a-stage"><iframe id="a-prox" hidden title="Game (proxied)" allow="fullscreen; autoplay; gamepad; pointer-lock"></iframe><iframe id="a-player" title="Game" sandbox="allow-scripts allow-pointer-lock allow-popups allow-forms allow-modals" allow="fullscreen; autoplay; gamepad; clipboard-write"></iframe></div>
+    <div class="hd"><span class="t" id="a-title"></span><span class="s" id="a-load"></span><button id="a-fit" type="button" aria-pressed="true" title="Scale small or off-center games to fill this window">Fit: on</button><button id="a-px" type="button" aria-pressed="false" title="Runs the game through the cstuff proxy, like a website. Slower, but works for games that break otherwise.">Proxy: off</button><button id="a-compat" type="button" aria-pressed="false" title="Lets the game use browser storage, which many games need. Less safe.">Compatibility: off</button><button id="a-hide" type="button" title="Hide this game from the list on this device (it does not load or is broken)">Hide game</button><button id="a-full">Fullscreen</button><button id="a-close">Close</button></div>
+    <div id="a-stage"><iframe id="a-prox" hidden title="Game (proxied)" allow="fullscreen; autoplay; gamepad; pointer-lock; cross-origin-isolated"></iframe><iframe id="a-player" title="Game" sandbox="allow-scripts allow-pointer-lock allow-popups allow-forms allow-modals allow-downloads" allow="fullscreen; autoplay; gamepad; clipboard-write; clipboard-read; web-share; cross-origin-isolated"></iframe></div>
     <div class="diag" id="a-diag" hidden></div>
   </div>
 </div>
@@ -55,9 +55,9 @@
     <div class="hint" id="g-hint"></div>
   </div>
 </div>
-<script src="/js/core.js?v=20261018l"></script>
-<script src="/js/leaves.js?v=20261018l"></script>
-<script src="/js/games.js?v=20261018l"></script>
-<script type="module" src="/js/advanced.js?v=20261018l"></script>
+<script src="/js/core.js?v=20261018n"></script>
+<script src="/js/leaves.js?v=20261018n"></script>
+<script src="/js/games.js?v=20261018n"></script>
+<script type="module" src="/js/advanced.js?v=20261018n"></script>
 </body>
 </html>
