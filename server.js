@@ -1,5 +1,7 @@
 import http from 'node:http';
 import dns from 'node:dns';
+import net from 'node:net';
+import tls from 'node:tls';
 import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,13 +21,14 @@ wisp.options.allow_udp_streams = false;
 // Scramjet refuses to proxy the site it is running on. Only that name may resolve to this machine.
 const GAME_HOST = 'cstuff-games.test';
 const TEST_LOOPBACK = process.env.ALLOW_LOOPBACK === '1'; // local testing only
-const resolver = new dns.Resolver();
+const resolver = new dns.promises.Resolver();
 if (Array.isArray(wisp.options.dns_servers) && wisp.options.dns_servers.length) { try { resolver.setServers(wisp.options.dns_servers); } catch {} }
 const isLoopback = (a) => /^(127\.|0\.0\.0\.0$|::1$|::$)/.test(a);
 wisp.options.dns_method = async (host) => {
   if (host === GAME_HOST) return '127.0.0.1';
   let addr;
-  try { addr = (await resolver.resolve4(host))[0]; } catch { addr = (await resolver.resolve6(host))[0]; }
+  // Same order the proxy library used before: IPv6 first, then IPv4. (Some hosts only reach the internet one way.)
+  try { addr = (await resolver.resolve6(host))[0]; } catch { try { addr = (await resolver.resolve4(host))[0]; } catch (e) { console.error('dns failed for', host, e && e.code); throw e; } }
   if (isLoopback(addr) && !TEST_LOOPBACK) throw new Error('blocked');
   return addr;
 };
@@ -50,6 +53,22 @@ app.get('/gm/_info', (_req, res) => res.json({ host: GAME_HOST, port: Number(POR
 app.use((req, res, next) => {
   if (req.path === '/games.html') { res.set({ 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless' }); }
   next();
+});
+// Connection check: open /_nettest to see whether this server can reach the internet (DNS, TCP and TLS).
+const NETTEST_HOSTS = new Set(['duckduckgo.com', 'en.wikipedia.org', 'www.google.com', 'example.com']);
+app.get('/_nettest', async (req, res) => {
+  const host = NETTEST_HOSTS.has(String(req.query.host)) ? String(req.query.host) : 'duckduckgo.com';
+  const out = { host, resolver: dns.getServers() };
+  const t = async (name, fn) => { const t0 = Date.now(); try { out[name] = { ok: await fn(), ms: Date.now() - t0 }; } catch (e) { out[name] = { error: (e && (e.code || e.message)) || String(e), ms: Date.now() - t0 }; } };
+  await t('dns_resolve6', () => resolver.resolve6(host));
+  await t('dns_resolve4', () => resolver.resolve4(host));
+  await t('dns_lookup', async () => (await dns.promises.lookup(host, { all: true })).map((a) => a.address));
+  const addrs = [...(out.dns_resolve6.ok || []).slice(0, 1), ...(out.dns_resolve4.ok || []).slice(0, 1)];
+  for (const a of addrs) {
+    await t('tcp_' + a, () => new Promise((ok, no) => { const s = net.connect({ host: a, port: 443, timeout: 6000 }, () => { s.destroy(); ok('connected'); }); s.on('error', no); s.on('timeout', () => { s.destroy(); no(new Error('timeout')); }); }));
+    await t('tls_' + a, () => new Promise((ok, no) => { const s = tls.connect({ host: a, port: 443, servername: host, timeout: 6000 }, () => { const p = s.getProtocol(); s.destroy(); ok('handshake ok ' + p); }); s.on('error', no); s.on('timeout', () => { s.destroy(); no(new Error('timeout')); }); }));
+  }
+  res.set('Cache-Control', 'no-store').type('json').send(JSON.stringify(out, null, 2));
 });
 app.get('/healthz', (_req, res) => res.type('text').send('ok'));
 
